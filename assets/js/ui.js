@@ -242,6 +242,7 @@ function mountCvh(mount, variants, player, ctx = {}) {
   });
   shell.append(bar);
   shell.append(speedRow(video));
+  mount.classList.add("has-cvh");
   mount.append(shell);
 
   apply(start, bar.querySelector("button"));
@@ -273,6 +274,7 @@ export function mountPlayer(mount, player, ctx = {}) {
   if (mount.dataset.playerKey === key && mount.childElementCount) return;
   mount.dataset.playerKey = key;
   if (mount._hls) { try { mount._hls.destroy(); } catch { /* уже уничтожен */ } mount._hls = null; }
+  mount.classList.remove("has-cvh");
   mount.innerHTML = "";
   const note = "Добавьте ссылку или код вставки в админ-панели: Контент → Редактировать → Эпизоды → Плееры.";
 
@@ -381,6 +383,7 @@ export function mountPlayer(mount, player, ctx = {}) {
     shell.className = "player-inner cvh-player";
     shell.append(video);
     shell.append(speedRow(video));
+    mount.classList.add("has-cvh");
     mount.append(shell);
     return;
   }

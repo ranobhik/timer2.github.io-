@@ -1477,12 +1477,31 @@ export function kodikMatchesTranslation(item, filter) {
  * Превращает элементы Kodik в карточки, пригодные для каталога:
  * серия = плеер этой озвучки. Постер берётся с Shikimori по его ID.
  */
-export function kodikCatalogEntries(items = [], { translation = "Рабочая партия", limit = 300 } = {}) {
+/* Свежесть озвучки: материал должен быть загружен на Kodik не раньше этой даты.
+   Год выхода аниме не используем — старые тайтлы, озвученные позже, остаются в каталоге. */
+export const KODIK_FRESH_SINCE = "2025-01-01";
+
+function kodikUploadedAt(item = {}) {
+  const raw = item.created_at || item.createdAt || item.updated_at || item.updatedAt || "";
+  const time = Date.parse(String(raw).trim().replace(" ", "T"));
+  return Number.isFinite(time) ? time : 0;
+}
+
+function isFreshUpload(item, since = KODIK_FRESH_SINCE) {
+  const cutoff = Date.parse(`${since}T00:00:00`);
+  if (!Number.isFinite(cutoff)) return true;
+  const uploaded = kodikUploadedAt(item);
+  /* даты нет — не выкидываем тайтл из каталога */
+  return uploaded ? uploaded >= cutoff : true;
+}
+
+export function kodikCatalogEntries(items = [], { translation = "Рабочая партия", limit = 300, freshSince = KODIK_FRESH_SINCE } = {}) {
   const entries = [];
   const seen = new Set();
   items.forEach((item) => {
     if (entries.length >= limit) return;
     if (!kodikMatchesTranslation(item, translation)) return;
+    if (!isFreshUpload(item, freshSince)) return;
     const episodes = Array.isArray(item.episodes) && item.episodes.length ? item.episodes : kodikEpisodes(item);
     if (!episodes.length) return;
     const title = String(item.title || item.title_orig || "").trim();

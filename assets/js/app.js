@@ -58,7 +58,7 @@ async function boot() {
    Авто-каталог Kodik: всё, что залито в плееры нужной озвучки,
    появляется на сайте само (кэш 6 часов, ничего не публикуется в git)
    ======================================================================= */
-const AUTO_KEY = "rp.auto.v3";
+const AUTO_KEY = "rp.auto.v4";
 const AUTO_TTL = 6 * 60 * 60 * 1000;
 let autoLoaded = false;
 /* idle | loading | done | empty | error | off — состояние авто-каталога */

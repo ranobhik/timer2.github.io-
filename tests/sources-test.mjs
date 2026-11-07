@@ -53,6 +53,7 @@ const KODIK_ITEM = {
   title: "Маска вермильона", title_orig: "Shuiro no Kamen", year: 2026,
   translation: { id: 777, title: "Рабочая партия", type: "voice" },
   episodes_count: 4, shikimori_id: "61999",
+  created_at: "2026-02-10T12:00:00Z", updated_at: "2026-03-01T12:00:00Z",
   seasons: {
     1: {
       link: "//kodik.info/season/61999/hash/720p",
@@ -215,6 +216,14 @@ check("Kodik→карточка: серии с плеерами", catalogEntries
 check("Kodik→карточка: плеер это ссылка Kodik", /kodikplayer\.com/.test(catalogEntries[0].episodes[0].players[0].url), catalogEntries[0]?.episodes?.[0]?.players?.[0]?.url);
 check("Kodik→карточка: постер не выдумываем", catalogEntries[0].poster === "", catalogEntries[0].poster);
 check("Kodik→карточка: кадр как запасная обложка", Boolean(catalogEntries[0].banner), catalogEntries[0].banner);
+check(
+  "Kodik→карточка: старая загрузка (до 2025) скрыта",
+  sources.kodikCatalogEntries([{ ...KODIK_ITEM, created_at: "2023-05-01T10:00:00Z" }], { translation: "Рабочая партия" }).length === 0,
+);
+check(
+  "Kodik→карточка: свежая загрузка старого тайтла остаётся",
+  sources.kodikCatalogEntries([{ ...KODIK_ITEM, year: 2011, created_at: "2025-04-02T10:00:00Z" }], { translation: "Рабочая партия" }).length === 1,
+);
 check("Kodik→карточка: чужая озвучка отфильтрована", sources.kodikCatalogEntries([KODIK_ITEM], { translation: "AniLibria" }).length === 0);
 
 /* Поиск MAL ID по названию */

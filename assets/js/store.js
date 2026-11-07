@@ -285,11 +285,20 @@ export function hasDraft() {
   return Boolean(safeGet(DRAFT_KEY));
 }
 
+/* Токены API нужны только в браузере админа — в публичный catalog.json они не попадают. */
+const SECRET_KEYS = ["kodikToken", "kinopoiskToken"];
+
+function publicSettings(settings = {}) {
+  const copy = { ...settings };
+  SECRET_KEYS.forEach((key) => { if (copy[key]) copy[key] = ""; });
+  return copy;
+}
+
 export function exportJSON(catalog = state.catalog) {
   const data = {
     version: 1,
     updatedAt: new Date().toISOString(),
-    settings: catalog.settings,
+    settings: publicSettings(catalog.settings),
     genres: catalog.genres,
     anime: catalog.anime,
   };

@@ -1838,12 +1838,12 @@ function settingsTab() {
         <div class="field span-2">
           <label for="s-kinopoisk">Токен Кинопоиска (X-API-KEY)</label>
           <input id="s-kinopoisk" name="kinopoiskToken" type="text" value="${attr(s.kinopoiskToken || "")}" placeholder="например: 8a1b2c3d-…" autocomplete="off" />
-          <p class="hint">Токен хранится в catalog.json вместе с остальными настройками. Не указывайте его, если импортируете только с Shikimori.</p>
+          <p class="hint">Токен остаётся в вашем браузере — в публикуемый catalog.json он не попадает.</p>
         </div>
         <div class="field span-2">
           <label for="s-kodik">Токен Kodik API <small>для авто-плееров</small></label>
           <input id="s-kodik" name="kodikToken" type="text" value="${attr(s.kodikToken || "")}" placeholder="токен партнёра kodikapi.com" autocomplete="off" />
-          <p class="hint">С токеном админка сама подставляет плееры озвучки (по умолчанию «Рабочая партия») в серии и умеет синхронизировать каталог с Kodik. Без токена плееры добавляются вручную.</p>
+          <p class="hint">Токен не публикуется: он хранится только в вашем браузере. С ним админка сама подставляет плееры озвучки (по умолчанию «Рабочая партия») в серии и умеет синхронизировать каталог с Kodik. Без токена плееры добавляются вручную.</p>
         </div>
         <div class="field">
           <label for="s-kodik-translation">Озвучка в Kodik</label>

@@ -110,7 +110,9 @@ globalThis.fetch = async (url, opts = {}) => {
   return { ok: status === 200, status, json: async () => body };
 };
 
-const sources = await import("/home/user/timer2.github.io-/assets/js/sources.js");
+const ROOT = "/home/user/timer2.github.io-";
+const sources = await import(`${ROOT}/assets/js/sources.js`);
+const store = await import(`${ROOT}/assets/js/store.js`);
 let pass = 0;
 let fail = 0;
 const check = (name, ok, extra = "") => {
@@ -172,6 +174,11 @@ dom.window.localStorage.removeItem("rp.translate.v1");
 const map = await sources.translateTitles(["The Mask of the War God", "Маска дыма"]);
 check("Перевод на русский", map["The Mask of the War God"] === "Перевод: The Mask of the War God", JSON.stringify(map));
 check("Русское не переводим", map["Маска дыма"] === undefined, JSON.stringify(map));
+
+/* Секреты не уходят в публичный каталог */
+const exported = JSON.parse(store.exportJSON({ settings: { kodikToken: "secret", kinopoiskToken: "kp", title: "x" }, anime: [], genres: [] }));
+check("Токены не публикуются", !exported.settings.kodikToken && !exported.settings.kinopoiskToken, JSON.stringify(exported.settings));
+check("Остальные настройки сохраняются", exported.settings.title === "x", JSON.stringify(exported.settings));
 
 console.log(`\n${pass}/${pass + fail} проверок пройдено`);
 if (fail) process.exit(1);

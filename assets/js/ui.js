@@ -114,7 +114,17 @@ function cvhProxy() {
   }
 }
 
-async function cvhStream(vkId) {
+/* Качества, которые отдаёт CVH (Odnoklassniki CDN): от лучшего к худшему */
+const CVH_QUALITIES = [
+  ["mpeg4kUrl", "2160p"],
+  ["mpegQhdUrl", "1440p"],
+  ["mpegFullHdUrl", "1080p"],
+  ["mpegHighUrl", "720p"],
+  ["mpegMediumUrl", "480p"],
+  ["mpegLowUrl", "360p"],
+];
+
+async function cvhFetch(vkId) {
   const url = `${CVH_API}/video/${encodeURIComponent(vkId)}`;
   let response;
   try {
@@ -125,9 +135,93 @@ async function cvhStream(vkId) {
     response = await fetch(`${proxy}${encodeURIComponent(url)}`, { cache: "no-store" });
   }
   if (!response.ok) throw new Error(`CVH ответил ${response.status}`);
-  const data = await response.json();
+  return response.json();
+}
+
+/** Все доступные качества по убыванию + HLS как «авто». */
+async function cvhVariants(vkId) {
+  const data = await cvhFetch(vkId);
   const list = data?.sources || {};
-  return list.mpegFullHdUrl || list.mpegHighUrl || list.mpegMediumUrl || list.mpegLowUrl || list.hlsUrl || "";
+  const variants = CVH_QUALITIES
+    .map(([key, label]) => ({ label, url: String(list[key] || "") }))
+    .filter((item) => item.url);
+  if (list.hlsUrl) variants.push({ label: "Авто", url: String(list.hlsUrl), hls: true });
+  return variants;
+}
+
+async function cvhStream(vkId) {
+  const variants = await cvhVariants(vkId);
+  const best = variants.find((item) => !item.hls) || variants[0];
+  return best ? best.url : "";
+}
+
+/** Плеер CVH: своё видео + выбор качества, как в плеере Shikimori. */
+function mountCvh(mount, variants, player, ctx = {}) {
+  const { anime, onProgress } = ctx;
+  const start = variants.find((item) => !item.hls) || variants[0];
+  mount.innerHTML = "";
+  const shell = document.createElement("div");
+  shell.className = "player-inner cvh-player";
+  const video = document.createElement("video");
+  video.controls = true;
+  video.playsInline = true;
+  video.preload = "metadata";
+  const poster = safeUrl(anime?.banner) || safeUrl(anime?.poster);
+  if (poster) video.poster = poster;
+  shell.append(video);
+
+  const bar = document.createElement("div");
+  bar.className = "cvh-quality";
+  const label = document.createElement("span");
+  label.className = "cvh-quality-label";
+  label.textContent = "Качество";
+  bar.append(label);
+
+  const apply = (variant, button) => {
+    const time = video.currentTime;
+    const playing = !video.paused;
+    if (variant.hls) {
+      loadHls()
+        .then((Hls) => {
+          if (mount._hls) { mount._hls.destroy(); mount._hls = null; }
+          if (Hls && Hls.isSupported() && video.canPlayType("application/vnd.apple.mpegurl") === "") {
+            const hls = new Hls({ enableWorker: true });
+            hls.loadSource(variant.url);
+            hls.attachMedia(video);
+            mount._hls = hls;
+          } else {
+            video.src = variant.url;
+          }
+          if (time) video.currentTime = time;
+          if (playing) video.play().catch(() => {});
+        })
+        .catch(() => { video.src = variant.url; });
+    } else {
+      if (mount._hls) { mount._hls.destroy(); mount._hls = null; }
+      video.src = variant.url;
+      if (time) video.currentTime = time;
+      if (playing) video.play().catch(() => {});
+    }
+    bar.querySelectorAll("button").forEach((item) => item.classList.toggle("is-active", item === button));
+  };
+
+  variants.forEach((variant) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "btn btn-ghost btn-sm";
+    button.textContent = variant.label;
+    button.addEventListener("click", () => apply(variant, button));
+    bar.append(button);
+  });
+  shell.append(bar);
+  mount.append(shell);
+
+  apply(start, bar.querySelector("button"));
+  if (typeof onProgress === "function") {
+    video.addEventListener("timeupdate", () => {
+      if (video.duration) onProgress(video.currentTime / video.duration);
+    });
+  }
 }
 
 export function playerPlaceholder(title, text) {
@@ -194,10 +288,10 @@ export function mountPlayer(mount, player, ctx = {}) {
       return;
     }
     mount.innerHTML = playerPlaceholder("Загружаю плеер CVH…", "Ссылка на видео запрашивается при каждом показе.");
-    cvhStream(vkId)
-      .then((url) => {
-        if (!url) throw new Error("CVH не вернул ссылку на видео");
-        mountPlayer(mount, { ...player, type: "video", url }, ctx);
+    cvhVariants(vkId)
+      .then((variants) => {
+        if (!variants.length) throw new Error("CVH не вернул ссылку на видео");
+        mountCvh(mount, variants, player, ctx);
       })
       .catch((error) => {
         mount.innerHTML = playerPlaceholder(

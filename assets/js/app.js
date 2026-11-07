@@ -22,6 +22,7 @@ let prefs = null;
 let searchHandler = null;
 let lastRenderedPath = "";
 let heroTimer = null;
+let heroIndex = 0; // текущий слайд — переживает перерисовку
 let heroController = null;
 
 /* =======================================================================
@@ -225,7 +226,8 @@ async function applyShikimoriBatch(entries) {
     const al = anilist[entry.shikimoriId] || null;
     if (al) {
       entry.poster = al.posterSmall || al.poster || "";
-      entry.banner = al.banner || "";
+      /* в карусели хотим кадры из серий, баннер AniList — запасной вариант */
+      entry.banner = shot || al.banner || "";
       entry.malId = Number(al.malId) || entry.malId || 0;
     }
     if (info) {
@@ -242,7 +244,7 @@ async function applyShikimoriBatch(entries) {
       if (!(entry.genres || []).length) entry.genres = (al.genres || []).map((genre) => sources.genreToRu(genre));
     }
     if (!entry.poster) entry.poster = shot || "";
-    if (!entry.banner && shot) entry.banner = shot;
+    if (!entry.banner && al?.banner) entry.banner = al.banner;
     if (!entry.description) entry.description = "";
   });
   return entries;
@@ -306,7 +308,7 @@ async function fillDetailsAndCvh(entries) {
             if (existing) {
               const players = Array.isArray(existing.players) ? existing.players : [];
               if (players.some((item) => item.url === url)) return;
-              existing.players = [...players, player];
+              existing.players = [player, ...players];
               if (!existing.title && episode.title) existing.title = episode.title;
             } else {
               entry.episodes.push({ number: episode.number, title: episode.title || "", date: "", duration: "", players: [player] });
@@ -772,9 +774,9 @@ function heroSlideHTML({ anime, label }, index) {
   const mediaUrl = banner || poster;
   const media = mediaUrl
     ? `<img class="hero-media-img" src="${attr(mediaUrl)}" alt="" referrerpolicy="no-referrer"
-        loading="${index === 0 ? "eager" : "lazy"}" decoding="async" draggable="false" onerror="this.remove()" />`
+        loading="${index === heroIndex ? "eager" : "lazy"}" decoding="async" draggable="false" onerror="this.remove()" />`
     : "";
-  return `<article class="hero-slide" data-slide="${index}" aria-hidden="${index !== 0}">
+  return `<article class="hero-slide" data-slide="${index}" aria-hidden="${index !== heroIndex}">
     <div class="hero-media ${mediaClass}" style="--h:${hueFrom(anime.title)}">${media}</div>
     <div class="hero-scrim"></div>
     <div class="hero-content">
@@ -797,7 +799,7 @@ function heroCarouselHTML(releases) {
   if (!releases.length) return "";
   const slides = releases.map(heroSlideHTML).join("");
   const dots = releases
-    .map(({ anime }, i) => `<button class="hero-dot" type="button" data-hero-dot="${i}" aria-label="Релиз ${i + 1}: ${attr(anime.title)}" aria-current="${i === 0}"></button>`)
+    .map(({ anime }, i) => `<button class="hero-dot" type="button" data-hero-dot="${i}" aria-label="Релиз ${i + 1}: ${attr(anime.title)}" aria-current="${i === heroIndex}"></button>`)
     .join("");
   return `<section class="hero-carousel${releases.length < 2 ? " is-single" : ""}" id="heroCarousel" aria-roledescription="карусель" aria-label="Релизы">
     <div class="hero-track">${slides}</div>
@@ -825,7 +827,7 @@ function initHeroCarousel() {
   const dots = $$("[data-hero-dot]", root);
   if (!track || slides.length < 2) return;
 
-  let index = 0;
+  let index = Math.max(0, Math.min(slides.length - 1, Number(heroIndex) || 0));
   let dragging = false;
   let moved = false;
   let startX = 0;
@@ -839,6 +841,7 @@ function initHeroCarousel() {
 
   const go = (next) => {
     index = (next + slides.length) % slides.length;
+    heroIndex = index;
     track.style.transition = "";
     render();
     slides.forEach((slide, i) => {
@@ -848,6 +851,8 @@ function initHeroCarousel() {
     });
     dots.forEach((dot, i) => dot.setAttribute("aria-current", String(i === index)));
   };
+
+  go(index); // восстановить слайд после перерисовки страницы
 
   const reduceMotion = Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
   const stop = () => clearHeroTimer();
@@ -1522,7 +1527,7 @@ function ensureCvhForAnime(anime) {
       const target = episodes.find((item) => item.number === episode.number);
       if (!target) return;
       if ((target.players || []).some((player) => player.url === url)) return;
-      target.players = [...(target.players || []), { name: `CVH · ${episode.studio || studio}`, type: "cvh", url, code: "" }];
+      target.players = [{ name: `CVH · ${episode.studio || studio}`, type: "cvh", url, code: "" }, ...(target.players || [])];
       if (!target.title && episode.title) target.title = episode.title;
     });
     render();
@@ -1552,8 +1557,11 @@ function watchView(id, episodeKey) {
 
   const query = new URLSearchParams(location.hash.split("?")[1] || "");
   const episode = store.findEpisode(anime, episodeKey) || episodes[0];
-  const playerIndex = Math.max(0, Math.min(episode.players.length - 1, Number(query.get("p")) || 0));
-  const player = episode.players[playerIndex] || episode.players[0];
+  /* CVH — основной плеер партии, поэтому он первый в списке и включён по умолчанию */
+  const players = [...(episode.players || [])].sort((a, b) => (b.type === "cvh" ? 1 : 0) - (a.type === "cvh" ? 1 : 0));
+  const requested = query.has("p") ? Number(query.get("p")) : 0;
+  const playerIndex = Math.max(0, Math.min(players.length - 1, Number(requested) || 0));
+  const player = players[playerIndex] || players[0];
 
   setTitle(`${anime.title} — ${episode.title || `серия ${episode.number}`}`);
 
@@ -1572,7 +1580,7 @@ function watchView(id, episodeKey) {
         </select>
         <label class="visually-hidden" for="playerSelect">Плеер</label>
         <select id="playerSelect" class="grow">
-          ${episode.players.map((p, i) => `<option value="${i}"${i === playerIndex ? " selected" : ""}>${esc(p.name)}</option>`).join("")}
+          ${players.map((p, i) => `<option value="${i}"${i === playerIndex ? " selected" : ""}>${esc(p.name)}</option>`).join("")}
         </select>
         <button class="btn btn-ghost btn-sm${store.isFavorite(anime.id) ? " is-on" : ""}" type="button" data-fav="${attr(anime.id)}">
           ${ui.icon("heart")} <span class="fav-label">${store.isFavorite(anime.id) ? "В избранном" : "В избранное"}</span>
@@ -1637,7 +1645,7 @@ function watchView(id, episodeKey) {
 
   document.getElementById("playerSelect")?.addEventListener("change", (event) => {
     const i = Number(event.target.value) || 0;
-    const chosen = episode.players[i];
+    const chosen = players[i];
     if (!chosen) return;
     const nextHash = `${store.watchHref(anime, episode)}?p=${i}`;
     history.replaceState(null, "", nextHash);

@@ -165,6 +165,7 @@ export function normalizeAnime(raw, index = 0) {
     published: item.published !== false,
     featured: item.featured === true,
     createdAt: String(item.createdAt || new Date().toISOString()),
+    totalEpisodes: Number(item.totalEpisodes) || 0,
     episodes,
   };
 }

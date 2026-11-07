@@ -155,6 +155,33 @@ async function cvhStream(vkId) {
   return best ? best.url : "";
 }
 
+const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+
+/** Ряд кнопок скорости воспроизведения. */
+function speedRow(video) {
+  const row = document.createElement("div");
+  row.className = "cvh-quality cvh-speed";
+  const label = document.createElement("span");
+  label.className = "cvh-quality-label";
+  label.textContent = "Скорость";
+  row.append(label);
+  const buttons = [];
+  SPEEDS.forEach((value) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "btn btn-ghost btn-sm";
+    button.textContent = value === 1 ? "1×" : `${String(value).replace(".", ",")}×`;
+    if (value === 1) button.classList.add("is-active");
+    button.addEventListener("click", () => {
+      video.playbackRate = value;
+      buttons.forEach((item) => item.classList.toggle("is-active", item === button));
+    });
+    buttons.push(button);
+    row.append(button);
+  });
+  return row;
+}
+
 /** Плеер CVH: своё видео + выбор качества, как в плеере Shikimori. */
 function mountCvh(mount, variants, player, ctx = {}) {
   const { anime, onProgress } = ctx;
@@ -214,6 +241,7 @@ function mountCvh(mount, variants, player, ctx = {}) {
     bar.append(button);
   });
   shell.append(bar);
+  shell.append(speedRow(video));
   mount.append(shell);
 
   apply(start, bar.querySelector("button"));
@@ -239,8 +267,13 @@ export function playerPlaceholder(title, text) {
  * @param {{anime?:object, onProgress?:(ratio:number)=>void}} ctx
  */
 export function mountPlayer(mount, player, ctx = {}) {
-  mount.innerHTML = "";
   const { anime, onProgress } = ctx;
+  /* перерисовка страницы не должна перезапускать уже показанный плеер */
+  const key = [player?.type, player?.url, player?.code, anime?.id].join("|");
+  if (mount.dataset.playerKey === key && mount.childElementCount) return;
+  mount.dataset.playerKey = key;
+  if (mount._hls) { try { mount._hls.destroy(); } catch { /* уже уничтожен */ } mount._hls = null; }
+  mount.innerHTML = "";
   const note = "Добавьте ссылку или код вставки в админ-панели: Контент → Редактировать → Эпизоды → Плееры.";
 
   if (!player || player.type === "demo" || (!player.url && !player.code)) {
@@ -344,7 +377,11 @@ export function mountPlayer(mount, player, ctx = {}) {
         }
       });
     }
-    mount.append(video);
+    const shell = document.createElement("div");
+    shell.className = "player-inner cvh-player";
+    shell.append(video);
+    shell.append(speedRow(video));
+    mount.append(shell);
     return;
   }
 

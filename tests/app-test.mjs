@@ -198,6 +198,12 @@ window.document.body.append(mount);
 ui.mountPlayer(mount, { name: "CVH · Рабочая партия (Дубляж)", type: "cvh", url: "cvh:111" }, { anime: { title: "Проверка" } });
 await wait(400);
 check("CVH: плеер собран из ссылки на поток", Boolean(mount.querySelector("video")), mount.innerHTML.slice(0, 80));
+check("CVH: есть выбор качества", Boolean(mount.querySelector(".cvh-quality")), mount.innerHTML.slice(0, 120));
+check("CVH: есть выбор скорости", mount.querySelectorAll(".cvh-speed button").length === 6, String(mount.querySelectorAll(".cvh-speed button").length));
+const firstVideo = mount.querySelector("video");
+ui.mountPlayer(mount, { name: "CVH · Рабочая партия (Дубляж)", type: "cvh", url: "cvh:111" }, { anime: { title: "Проверка" } });
+await wait(300);
+check("Плеер не пересоздаётся при перерисовке", mount.querySelector("video") === firstVideo);
 
 /* Настройки: ключи API */
 window.location.hash = "#/admin/settings";

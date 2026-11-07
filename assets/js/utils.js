@@ -73,7 +73,11 @@ export function plural(n, one, few, many) {
 
 export function formatDate(iso) {
   if (!iso) return "";
-  const d = new Date(iso);
+  const raw = String(iso);
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  const d = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : new Date(raw);
   if (Number.isNaN(d.getTime())) return "";
   return d.toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" });
 }

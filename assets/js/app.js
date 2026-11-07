@@ -29,6 +29,7 @@ async function boot() {
   applySettings();
   buildNav();
   bindGlobalUI();
+  syncHeaderOffset();
 
   if (!location.hash) {
     history.replaceState(null, "", "#/");
@@ -112,6 +113,7 @@ function applySettings() {
     document.head.append(style);
   }
   style.textContent = s.customCss || "";
+  if (typeof syncHeaderOffset === "function") setTimeout(syncHeaderOffset, 30);
 }
 
 function buildNav() {
@@ -144,6 +146,11 @@ function markActiveNav(path) {
   }
 }
 
+function syncHeaderOffset() {
+  const height = siteHeader ? siteHeader.getBoundingClientRect().height : 68;
+  document.documentElement.style.setProperty("--header-offset", `${Math.round(height)}px`);
+}
+
 function setTitle(title) {
   document.title = title ? `${title} — ${settings().siteName}` : `${settings().siteName} — ${settings().tagline}`;
 }
@@ -157,6 +164,11 @@ function bindGlobalUI() {
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.content = next === "light" ? "#f6f7fb" : "#07070c";
   });
+
+  window.addEventListener("load", syncHeaderOffset);
+  if (document.fonts?.ready) document.fonts.ready.then(syncHeaderOffset).catch(() => {});
+  window.addEventListener("resize", debounce(syncHeaderOffset, 150));
+  window.addEventListener("orientationchange", () => setTimeout(syncHeaderOffset, 250));
 
   navToggle?.addEventListener("click", () => {
     const open = headerInner.classList.toggle("is-nav-open");
@@ -651,7 +663,7 @@ function animeView(id) {
                 ${(anime.description || "Описание пока не добавлено.").split(/\n{2,}/).map((p) => `<p>${esc(p)}</p>`).join("")}
               </div>
             </div>
-            ${(anime.description || "").length > 320 ? `<button class="btn btn-ghost btn-sm" type="button" id="descToggle" style="margin-top:10px">Читать полностью</button>` : ""}
+            ${(anime.description || "").length > 420 ? `<button class="btn btn-ghost btn-sm" type="button" id="descToggle" style="margin-top:10px">Читать полностью</button>` : ""}
           </div>
 
           <dl class="detail-grid">

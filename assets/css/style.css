@@ -852,7 +852,7 @@ main { display: block; min-height: 60vh; padding-bottom: 40px; }
 }
 .anime-poster {
   position: sticky;
-  top: calc(var(--header-h) + 18px);
+  top: calc(var(--header-offset, var(--header-h)) + 18px);
   border-radius: var(--radius-lg);
   overflow: hidden;
   border: 1px solid var(--line);
@@ -883,7 +883,12 @@ main { display: block; min-height: 60vh; padding-bottom: 40px; }
 
 .prose { color: var(--text-soft); max-width: 78ch; overflow-wrap: anywhere; }
 .prose p + p { margin-top: .8em; }
-.prose.is-clamped p:nth-child(n + 4) { display: none; }
+.prose.is-clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 8;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 
 .detail-grid {
   display: grid;
@@ -1115,7 +1120,7 @@ main { display: block; min-height: 60vh; padding-bottom: 40px; }
   border-radius: 99px;
   background: var(--surface);
   position: sticky;
-  top: calc(var(--header-h) + 8px);
+  top: calc(var(--header-offset, var(--header-h)) + 8px);
   z-index: 20;
   backdrop-filter: blur(12px);
 }

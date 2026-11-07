@@ -1,18 +1,164 @@
-<!doctype html>
-<html lang="ru">
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0b0c10" />
-    <meta name="description" content="Таймер ET-66 — точный обратный отсчёт с подходами, звуками и временем в заголовке вкладки" />
-    <link rel="icon" id="favicon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%2316171c'/%3E%3Ccircle cx='32' cy='32' r='18' fill='none' stroke='%23ff5a1f' stroke-width='7'/%3E%3C/svg%3E" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#07070c" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Рабочая партия — аниме онлайн</title>
+    <meta
+      name="description"
+      content="Рабочая партия — аниме-портал: каталог, эпизоды, плееры и удобный просмотр на любом устройстве."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Рабочая партия — аниме онлайн" />
+    <meta property="og:description" content="Каталог аниме, эпизоды и плееры. Адаптивно, с тёмной темой." />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230a0a12'/%3E%3Cpath d='M32 12l5.6 12.4 13.4 1.6-10 9.2 2.7 13.3L32 42l-11.7 6.5L23 35.2l-10-9.2 13.4-1.6z' fill='%23f43f5e'/%3E%3C/svg%3E"
+    />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <title>Таймер ET-66</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Unbounded:wght@600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./assets/css/style.css" />
+    <script type="module" src="./assets/js/app.js"></script>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <a class="skip-link" href="#view" id="skipLink">Перейти к содержимому</a>
+
+    <!-- Иконки -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true" focusable="false">
+      <defs>
+        <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></symbol>
+        <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></symbol>
+        <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 13.5A8.5 8.5 0 1 1 10.5 3a7 7 0 0 0 10.5 10.5z"/></symbol>
+        <symbol id="i-heart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 20s-7.5-4.6-7.5-9.4A4.1 4.1 0 0 1 12 7.6a4.1 4.1 0 0 1 7.5 3C19.5 15.4 12 20 12 20z"/></symbol>
+        <symbol id="i-star" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5l2.9 6.4 7 .7-5.2 4.7 1.4 6.9L12 17.7 5.9 21.2l1.4-6.9L2.1 9.6l7-.7z"/></symbol>
+        <symbol id="i-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.6c0-.9 1-1.5 1.8-1l8.1 5.1c.8.5.8 1.6 0 2.1l-8.1 5.1c-.8.5-1.8-.1-1.8-1z"/></symbol>
+        <symbol id="i-menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></symbol>
+        <symbol id="i-home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 10.5L12 3.5l8.5 7"/><path d="M5.5 9.5V20a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V9.5"/></symbol>
+        <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></symbol>
+        <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l7.5 3v6c0 4.4-3.1 7.7-7.5 9-4.4-1.3-7.5-4.6-7.5-9V6z"/><path d="M9 12l2 2 4-4"/></symbol>
+        <symbol id="i-chevron-right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></symbol>
+        <symbol id="i-chevron-left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></symbol>
+        <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+        <symbol id="i-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M9.5 7V4.8h5V7M6.5 7l.9 13h9.2l.9-13"/></symbol>
+        <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 5.5A2 2 0 0 0 13.5 3.5h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2"/></symbol>
+        <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v11M7.5 10.5L12 15l4.5-4.5M4 20h16"/></symbol>
+        <symbol id="i-upload" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15.5v-11M7.5 8.5L12 4l4.5 4.5M4 20h16"/></symbol>
+        <symbol id="i-save" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M5 4h11l3 3v13H5z"/><path d="M8.5 4v5h6V4M8.5 20v-6h7v6"/></symbol>
+        <symbol id="i-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L20 8l-4-4L4 16z"/><path d="M14.5 5.5l4 4"/></symbol>
+        <symbol id="i-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h5a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-5"/><path d="M10 8l-4 4 4 4M6 12h9"/></symbol>
+        <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="4.5" y="10" width="15" height="10" rx="2.5"/><path d="M8 10V7.5a4 4 0 0 1 8 0V10"/></symbol>
+        <symbol id="i-info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.8v.2"/></symbol>
+        <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 12.5l5 5 10-11"/></symbol>
+        <symbol id="i-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+        <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+        <symbol id="i-tv" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="M8 21h8M12 18v3"/></symbol>
+        <symbol id="i-external" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+        <symbol id="i-sparkles" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.8 5.2L19 9l-5.2 1.8L12 16l-1.8-5.2L5 9l5.2-1.8z"/><path d="M18.5 15l.9 2.6 2.6.9-2.6.9-.9 2.6-.9-2.6-2.6-.9 2.6-.9z"/></symbol>
+        <symbol id="i-tg" viewBox="0 0 24 24" fill="currentColor"><path d="M21.6 4.3L2.9 11.4c-1 .4-1 1.4 0 1.7l4.6 1.5 1.8 5.5c.3.6.8.7 1.4.3l2.6-2 4.6 3.4c.8.5 1.5.2 1.7-.8L22.9 5.6c.2-1-.5-1.7-1.3-1.3zM8.7 14.2l8.4-5.3c.4-.2.7.1.4.4l-6.9 6.4-.3 3z"/></symbol>
+        <symbol id="i-vk" viewBox="0 0 24 24" fill="currentColor"><path d="M12.8 18c-6 0-9.4-4.1-9.5-11h3c.1 5 2.3 7.2 4 7.6V7h2.9v4.3c1.7-.2 3.4-2.1 4-4.3h2.9a8 8 0 0 1-3.5 5.2 8.3 8.3 0 0 1 4 5.8h-3.2a5.1 5.1 0 0 0-4.2-3.9v3.9z"/></symbol>
+        <symbol id="i-gh" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-3.2 19.5c.5.1.7-.2.7-.5v-1.8c-2.8.6-3.4-1.3-3.4-1.3-.4-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.3 1.1 2.9.8.1-.7.4-1.1.6-1.4-2.2-.2-4.6-1.1-4.6-5A3.9 3.9 0 0 1 6.6 8c-.1-.2-.4-1.2.1-2.4 0 0 .8-.3 2.8 1a9.5 9.5 0 0 1 5 0c2-1.3 2.8-1 2.8-1 .5 1.2.2 2.2.1 2.4a3.9 3.9 0 0 1 1 2.7c0 3.9-2.4 4.8-4.6 5 .4.3.7.9.7 1.9v2.8c0 .3.2.6.7.5A10 10 0 0 0 12 2z"/></symbol>
+        <symbol id="i-ds" viewBox="0 0 24 24" fill="currentColor"><path d="M19.5 5.6A16 16 0 0 0 15.6 4l-.3.6a12 12 0 0 1 3.5 1.7 12.5 12.5 0 0 0-10.6 0A12 12 0 0 1 11.7 4.6L11.4 4a16 16 0 0 0-3.9 1.6C4.9 9.8 4.2 14 4.5 18a16 16 0 0 0 4.9 2.5l1-1.6c-.6-.2-1.2-.5-1.7-.9l.4-.3a8.9 8.9 0 0 0 7.6 0l.4.3c-.5.4-1.1.7-1.7.9l1 1.6A16 16 0 0 0 21.4 18c.4-4.6-.6-8.7-1.9-12.4zM9.5 15.4c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2zm5 0c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2z"/></symbol>
+        <symbol id="i-yt" viewBox="0 0 24 24" fill="currentColor"><path d="M21.6 7.2a2.6 2.6 0 0 0-1.8-1.8C18.2 5 12 5 12 5s-6.2 0-7.8.4A2.6 2.6 0 0 0 2.4 7.2 27 27 0 0 0 2 12a27 27 0 0 0 .4 4.8 2.6 2.6 0 0 0 1.8 1.8C5.8 19 12 19 12 19s6.2 0 7.8-.4a2.6 2.6 0 0 0 1.8-1.8A27 27 0 0 0 22 12a27 27 0 0 0-.4-4.8zM10 15.2V8.8l5.4 3.2z"/></symbol>
+      </defs>
+    </svg>
+
+    <!-- Шапка -->
+    <header class="site-header" id="siteHeader">
+      <div class="header-inner" id="headerInner">
+        <a class="brand" href="#/" aria-label="На главную">
+          <span class="brand-mark" id="brandMark">★</span>
+          <span class="brand-text">
+            <strong data-site-name>Рабочая партия</strong>
+            <small data-site-tagline>аниме онлайн</small>
+          </span>
+        </a>
+
+        <nav class="main-nav" id="mainNav" aria-label="Основная навигация"></nav>
+
+        <form class="search" id="searchForm" role="search">
+          <svg aria-hidden="true"><use href="#i-search" /></svg>
+          <label class="visually-hidden" for="searchInput">Поиск аниме</label>
+          <input id="searchInput" name="q" type="search" placeholder="Поиск аниме…" autocomplete="off" enterkeyhint="search" />
+          <button class="visually-hidden" type="submit">Найти</button>
+          <kbd>/</kbd>
+        </form>
+
+        <div class="header-actions">
+          <button class="icon-btn nav-toggle" id="navToggle" type="button" aria-label="Меню" aria-expanded="false">
+            <svg><use href="#i-menu" /></svg>
+          </button>
+          <button class="icon-btn" id="themeToggle" type="button" aria-label="Переключить тему" title="Светлая / тёмная тема">
+            <svg class="icon-sun"><use href="#i-sun" /></svg>
+            <svg class="icon-moon"><use href="#i-moon" /></svg>
+          </button>
+          <a class="btn btn-ghost btn-sm btn-admin" href="#/admin" title="Админ-панель">
+            <svg><use href="#i-shield" /></svg>
+            <span class="btn-admin-label">Админ</span>
+          </a>
+        </div>
+      </div>
+
+      <div class="announce" id="announce" hidden>
+        <span class="announce-label">Объявление</span>
+        <div class="announce-viewport"><div class="announce-track" id="announceTrack"></div></div>
+      </div>
+    </header>
+
+    <!-- Контент -->
+    <main id="view" tabindex="-1"></main>
+
+    <!-- Футер -->
+    <footer class="site-footer">
+      <div class="container">
+        <div class="footer-inner">
+          <div class="footer-brand">
+            <a class="brand" href="#/">
+              <span class="brand-mark" data-site-mark>★</span>
+              <span class="brand-text">
+                <strong data-site-name>Рабочая партия</strong>
+                <small data-site-tagline>аниме онлайн</small>
+              </span>
+            </a>
+            <p data-site-description>Аниме-портал команды «Рабочая партия».</p>
+            <div class="socials" id="socials"></div>
+          </div>
+          <div class="footer-col">
+            <h3>Разделы</h3>
+            <ul id="footerLinks"></ul>
+          </div>
+          <div class="footer-col">
+            <h3>Команда</h3>
+            <ul>
+              <li><a href="#/about">О проекте</a></li>
+              <li><a href="#/admin">Админ-панель</a></li>
+              <li><a href="#/catalog">Каталог</a></li>
+            </ul>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <span data-footer-text>© 2026 «Рабочая партия»</span>
+          <span class="muted">Сделано на GitHub Pages · без бэкенда</span>
+        </div>
+      </div>
+    </footer>
+
+    <!-- Мобильная навигация -->
+    <nav class="bottom-nav" aria-label="Мобильная навигация">
+      <a href="#/" data-nav="home"><svg><use href="#i-home" /></svg><span>Главная</span></a>
+      <a href="#/catalog" data-nav="catalog"><svg><use href="#i-grid" /></svg><span>Каталог</span></a>
+      <a href="#/favorites" data-nav="favorites"><svg><use href="#i-heart" /></svg><span>Избранное</span></a>
+      <a href="#/admin" data-nav="admin"><svg><use href="#i-shield" /></svg><span>Админ</span></a>
+    </nav>
+
+    <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
   </body>
 </html>

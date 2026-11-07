@@ -94,7 +94,7 @@ window.fetch = async (url, opts = {}) => {
       seasons: { 1: { episodes: { 1: { link: "//kodik.info/seria/1/a/720p" }, 2: { link: "//kodik.info/seria/2/b/720p" } } } },
     }] }; status = 200;
   }
-  return { ok: status === 200, status, json: async () => body };
+  return { ok: status === 200, status, json: async () => body, text: async () => JSON.stringify(body) };
 };
 g.fetch = window.fetch;
 
@@ -176,6 +176,7 @@ check("Авто-каталог: карточка из Kodik", autoAnime.length =
 check("В каталоге только тайтлы озвучки", storeMod.getCatalog().anime.every((a) => a.id.startsWith("kodik-")), String(storeMod.getCatalog().anime.length));
 check("Авто-каталог: плееры в сериях", autoAnime[0]?.episodes?.[0]?.players?.[0]?.type === "iframe", JSON.stringify(autoAnime[0]?.episodes?.[0]?.players));
 check("Авто-каталог: ссылка плеера рабочая", /^https:\/\/kodikplayer\.com\//.test(autoAnime[0]?.episodes?.[0]?.players?.[0]?.url || ""), autoAnime[0]?.episodes?.[0]?.players?.[0]?.url);
+check("Авто-каталог: постер не заглушка Shikimori", /anilist|kodikres|shikimori\.(one|io)\/system/.test(autoAnime[0]?.poster || "") && !/missing_/.test(autoAnime[0]?.poster || ""), autoAnime[0]?.poster);
 check("Авто-каталог: описание из Shikimori", /Перу/.test(autoAnime[0]?.description || ""), (autoAnime[0]?.description || "").slice(0, 40));
 check("Авто-каталог: жанры из Shikimori", (autoAnime[0]?.genres || []).includes("Экшен"), JSON.stringify(autoAnime[0]?.genres));
 check("Авто-каталог: оценка из Shikimori", Number(autoAnime[0]?.rating) > 0, String(autoAnime[0]?.rating));

@@ -49,6 +49,7 @@ const JIKAN_EPISODES = {
 };
 const KODIK_ITEM = {
   id: "serial-61999", type: "anime-serial", link: "//kodik.info/serial/61999/hash/720p",
+  screenshots: ["https://i.kodikres.com/screenshots/seria/1677794/1.jpg"],
   title: "Маска вермильона", title_orig: "Shuiro no Kamen", year: 2026,
   translation: { id: 777, title: "Рабочая партия", type: "voice" },
   episodes_count: 4, shikimori_id: "61999",
@@ -122,7 +123,7 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("kodik-api.com/list")) {
     body = { results: [{ ...KODIK_ITEM, shikimori_id: "61999" }], next_page: "" }; status = 200;
   }
-  return { ok: status === 200, status, json: async () => body };
+  return { ok: status === 200, status, json: async () => body, text: async () => JSON.stringify(body) };
 };
 
 const ROOT = "/home/user/timer2.github.io-";
@@ -212,7 +213,8 @@ check("Транслит в slug", sources.translitSlug("Маска вермил�
 const catalogEntries = sources.kodikCatalogEntries([KODIK_ITEM], { translation: "Рабочая партия" });
 check("Kodik→карточка: серии с плеерами", catalogEntries.length === 1 && catalogEntries[0].episodes.length === 2, JSON.stringify(catalogEntries[0]?.episodes?.length));
 check("Kodik→карточка: плеер это ссылка Kodik", /kodikplayer\.com/.test(catalogEntries[0].episodes[0].players[0].url), catalogEntries[0]?.episodes?.[0]?.players?.[0]?.url);
-check("Kodik→карточка: постер по Shikimori ID", /shikimori/.test(catalogEntries[0].poster), catalogEntries[0].poster);
+check("Kodik→карточка: постер не выдумываем", catalogEntries[0].poster === "", catalogEntries[0].poster);
+check("Kodik→карточка: кадр как запасная обложка", Boolean(catalogEntries[0].banner), catalogEntries[0].banner);
 check("Kodik→карточка: чужая озвучка отфильтрована", sources.kodikCatalogEntries([KODIK_ITEM], { translation: "AniLibria" }).length === 0);
 
 /* Поиск MAL ID по названию */
@@ -260,10 +262,10 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.startsWith("https://kodik-api.com")) throw new TypeError("Failed to fetch");
   if (u.includes("allorigins")) {
     await new Promise((r) => setTimeout(r, 40));
-    return { ok: true, status: 200, json: async () => ({ results: [{ id: 7, title: "Рабочая партия", type: "voice" }] }) };
+    const body = { results: [{ id: 7, title: "Рабочая партия", type: "voice" }] };
+    return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
   }
-  if (/codetabs|cors\.eu\.org|workers\.dev/.test(u)) throw new TypeError("Failed to fetch");
-  return beforeRepair(url, opts);
+  throw new TypeError("Failed to fetch");
 };
 const raceStart = Date.now();
 const viaProxy = await sources.kodikTranslations({ token: "t" });

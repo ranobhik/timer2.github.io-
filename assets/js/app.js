@@ -57,7 +57,7 @@ async function boot() {
    Авто-каталог Kodik: всё, что залито в плееры нужной озвучки,
    появляется на сайте само (кэш 6 часов, ничего не публикуется в git)
    ======================================================================= */
-const AUTO_KEY = "rp.auto.v2";
+const AUTO_KEY = "rp.auto.v3";
 const AUTO_TTL = 6 * 60 * 60 * 1000;
 let autoLoaded = false;
 /* idle | loading | done | empty | error | off — состояние авто-каталога */
@@ -129,7 +129,11 @@ async function loadAutoCatalog(force = false) {
     if (cached) {
       autoStatus = "done";
       mergeAutoCatalog(cached, true);
-      fillDetailsAndCvh(cached);
+      applyShikimoriBatch(cached).then(() => {
+        writeAutoCache(cached);
+        patchAutoEntries(cached);
+        fillDetailsAndCvh(cached);
+      });
       return;
     }
   }
@@ -200,29 +204,46 @@ async function loadAutoCatalog(force = false) {
 /* --- Обогащение авто-каталога --- */
 const STATUS_MAP = { ongoing: "ongoing", released: "released", anons: "announced" };
 
-/** Быстрый слой: один пакетный запрос к Shikimori — название, оценка, статус, постер. */
+/** Быстрый слой: пакетные запросы — постеры и баннеры из AniList, названия и оценки из Shikimori. */
 async function applyShikimoriBatch(entries) {
   const ids = [...new Set(entries.map((entry) => entry.shikimoriId).filter(Boolean))];
-  let map = {};
+  let shiki = {};
+  let anilist = {};
   if (ids.length) {
-    try {
-      map = await getShikimoriBatch(ids);
-    } catch (error) {
-      console.debug("Обогащение каталога:", error?.message);
-    }
+    await Promise.all([
+      getShikimoriBatch(ids).then((data) => { shiki = data || {}; }).catch((error) => {
+        console.debug("Shikimori batch:", error?.message);
+      }),
+      sources.anilistBatch(ids).then((data) => { anilist = data || {}; }).catch((error) => {
+        console.debug("AniList batch:", error?.message);
+      }),
+    ]);
   }
   entries.forEach((entry) => {
-    const info = map[entry.shikimoriId];
+    const shot = entry.banner; // кадр из серии Kodik (запасной вариант)
+    const info = shiki[entry.shikimoriId] || null;
+    const al = anilist[entry.shikimoriId] || null;
+    if (al) {
+      entry.poster = al.posterSmall || al.poster || "";
+      entry.banner = al.banner || "";
+      entry.malId = Number(al.malId) || entry.malId || 0;
+    }
     if (info) {
       entry.title = info.title || entry.title;
       entry.originalTitle = entry.originalTitle || info.originalTitle || "";
       entry.rating = Number(info.rating) || entry.rating || 0;
       entry.year = entry.year || info.year;
       entry.status = STATUS_MAP[info.status] || entry.status || "ongoing";
-      if (info.poster) entry.poster = info.poster;
+      if (!entry.poster && info.poster) entry.poster = info.poster;
+      if (Array.isArray(info.genres) && info.genres.length) entry.genres = info.genres;
     }
-    /* нет постера — берём кадр из серии Kodik, чтобы карточка не была пустой */
-    if (!entry.poster) entry.poster = entry.banner || "";
+    if (al) {
+      entry.rating = entry.rating || al.rating || 0;
+      if (!(entry.genres || []).length) entry.genres = (al.genres || []).map((genre) => sources.genreToRu(genre));
+    }
+    if (!entry.poster) entry.poster = shot || "";
+    if (!entry.banner && shot) entry.banner = shot;
+    if (!entry.description) entry.description = "";
   });
   return entries;
 }
@@ -276,7 +297,7 @@ async function fillDetailsAndCvh(entries) {
       if (attachCvh(entry)) {
         cvhTried += 1;
         try {
-          const items = await sources.cvhPlaylist({ id: entry.malId || entry.shikimoriId, pub, aggr, proxy });
+          const items = await sources.cvhPlaylist({ id: entry.malId || entry.shikimoriId, pub, aggr, proxy, textProxy: false });
           const found = sources.cvhEpisodes(items, { translation: studio });
           found.forEach((episode) => {
             const url = sources.cvhPlayerUrl(episode.vkId);

@@ -110,6 +110,26 @@ function cacheWrite(key, data) {
 }
 
 /* ---------- HTTP ---------- */
+/** Прокси-обёртки (r.jina.ai) возвращают JSON внутри текста — вытаскиваем объект. */
+function parseJson(text) {
+  const raw = String(text || "").trim();
+  if (!raw) throw new Error("Пустой ответ сервера");
+  try {
+    return JSON.parse(raw);
+  } catch {
+    /* ничего — пробуем вырезать JSON из текста */
+  }
+  const start = raw.search(/[[{]/);
+  if (start < 0) throw new Error("Ответ не похож на JSON");
+  const end = Math.max(raw.lastIndexOf("}"), raw.lastIndexOf("]"));
+  const slice = raw.slice(start, end + 1);
+  try {
+    return JSON.parse(slice);
+  } catch {
+    throw new Error("Ответ не похож на JSON");
+  }
+}
+
 async function request(url, { method = "GET", headers = {}, body, timeout = 8000, cache = true } = {}) {
   const key = cache ? cacheKey(url, body) : "";
   if (key) {
@@ -129,7 +149,8 @@ async function request(url, { method = "GET", headers = {}, body, timeout = 8000
       const hint = res.status === 401 || res.status === 403 ? " (нужен/проверьте токен)" : "";
       throw new Error(`HTTP ${res.status}${hint}`);
     }
-    const data = await res.json();
+    const text = await res.text();
+    const data = parseJson(text);
     if (key) cacheWrite(key, data);
     return data;
   } catch (error) {
@@ -326,6 +347,7 @@ function anilistCandidate(media) {
     score: media.averageScore ? media.averageScore / 10 : 0,
     kind: media.format ? media.format.replace(/_/g, " ").toLowerCase() : "",
     poster: media.coverImage?.extraLarge || media.coverImage?.large || "",
+    posterSmall: media.coverImage?.large || media.coverImage?.medium || media.coverImage?.extraLarge || "",
     episodes: media.episodes || 0,
     status: ANIME_STATUS[media.status] || "ongoing",
   };
@@ -348,6 +370,7 @@ export function mapAniListFull(media) {
     ageRating: "",
     description: String(media.description || "").replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim(),
     poster: media.coverImage?.extraLarge || media.coverImage?.large || "",
+    posterSmall: media.coverImage?.large || media.coverImage?.medium || media.coverImage?.extraLarge || "",
     banner: media.bannerImage || "",
     screenshots: media.bannerImage ? [media.bannerImage] : [],
     studio: media.studios?.edges?.[0]?.node?.name || "",
@@ -542,6 +565,32 @@ export function mergeGenres(...lists) {
 /* ======================================================================
    AniList по MyAnimeList ID — точная связка без поиска по названию
    ====================================================================== */
+/** Пакет AniList по MAL ID: постеры, баннеры, жанры и оценки одним запросом. */
+export async function anilistBatch(malIds = []) {
+  const ids = [...new Set((Array.isArray(malIds) ? malIds : [])
+    .map((id) => Number(id)).filter((id) => id > 0))];
+  const out = {};
+  if (!ids.length) return out;
+  for (let i = 0; i < ids.length; i += 40) {
+    const chunk = ids.slice(i, i + 40);
+    const gql = `query ($ids: [Int]) { Page(perPage: ${chunk.length}) { media(type: ANIME, idMal_in: $ids) { ${ANILIST_FIELDS} } } }`;
+    try {
+      const data = await request(ANILIST_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: gql, variables: { ids: chunk } }),
+      });
+      (data?.data?.Page?.media || []).forEach((media) => {
+        const mapped = mapAniListFull(media);
+        if (mapped?.malId) out[String(mapped.malId)] = mapped;
+      });
+    } catch (error) {
+      console.debug("AniList batch:", error?.message);
+    }
+  }
+  return out;
+}
+
 export async function getAniListByMal(malId) {
   const id = Number(malId);
   if (!id) return null;
@@ -1026,7 +1075,10 @@ export async function translateTitles(titles, { limit = 60 } = {}) {
 const KODIK_API = "https://kodik-api.com";
 
 function proxied(url, proxy) {
-  return proxy ? `${proxy}${encodeURIComponent(url)}` : url;
+  if (!proxy) return url;
+  /* r.jina.ai принимает адрес как есть, остальные прокси — в виде query-параметра */
+  if (/^https:\/\/r\.jina\.ai\/$/.test(proxy)) return `${proxy}${url}`;
+  return `${proxy}${encodeURIComponent(url)}`;
 }
 
 /* Публичные CORS-прокси: запросы идут параллельно, побеждает первый ответивший. */
@@ -1037,6 +1089,7 @@ const PUBLIC_PROXIES = [
   "https://corsproxy.io/?url=",
   "https://cors.eu.org/",
   "https://test.cors.workers.dev/?",
+  "https://r.jina.ai/",
 ];
 
 /** Короткая понятная причина, если не ответил ни один путь. */
@@ -1053,8 +1106,8 @@ function pickError(errors) {
  * Гонка «напрямую + прокси»: все варианты стартуют одновременно,
  * возвращается первый успешный ответ. Так ожидание не суммируется.
  */
-async function raceRequest(url, { proxy = "", timeout = 15000, hedge = 2500 } = {}) {
-  const candidates = proxy ? [proxy] : PUBLIC_PROXIES;
+async function raceRequest(url, { proxy = "", timeout = 15000, hedge = 2500, proxies = null } = {}) {
+  const candidates = proxy ? [proxy] : (Array.isArray(proxies) ? proxies : PUBLIC_PROXIES);
   const targets = [
     { label: "напрямую", url },
     ...candidates.map((item, index) => ({ label: proxy ? "через свой прокси" : `через прокси №${index + 1}`, url: proxied(url, item) })),
@@ -1259,16 +1312,17 @@ export async function kodikList({ token, translationId = "", proxy = "", types =
    ======================================================================= */
 const CVH_API = "https://plapi.cdnvideohub.com/api/v1/player/sv";
 
-async function cvhRequest(url, proxy = "", timeout = 16000) {
-  return raceRequest(url, { proxy, timeout });
+async function cvhRequest(url, proxy = "", timeout = 16000, textProxy = true) {
+  const proxies = textProxy ? null : PUBLIC_PROXIES.filter((item) => !/r\.jina\.ai/.test(item));
+  return raceRequest(url, { proxy, timeout, proxies });
 }
 
 /** Все серии и озвучки тайтла CVH по его числовому ID. */
-export async function cvhPlaylist({ id, pub = "747", aggr = "mali", proxy = "" } = {}) {
+export async function cvhPlaylist({ id, pub = "747", aggr = "mali", proxy = "", textProxy = true } = {}) {
   const clean = String(id || "").trim();
   if (!clean) throw new Error("Не указан ID тайтла в CVH");
   const url = `${CVH_API}/playlist?pub=${encodeURIComponent(pub)}&aggr=${encodeURIComponent(aggr)}&id=${encodeURIComponent(clean)}`;
-  const data = await cvhRequest(url, proxy);
+  const data = await cvhRequest(url, proxy, 16000, textProxy);
   const items = Array.isArray(data?.items) ? data.items : [];
   return items
     .map((item) => ({
@@ -1444,8 +1498,9 @@ export function kodikCatalogEntries(items = [], { translation = "Рабочая 
       originalTitle: String(item.originalTitle || item.title_orig || "").trim(),
       year: Number(item.year) || new Date().getFullYear(),
       shikimoriId,
-      poster: shikimoriId ? posterUrlById(shikimoriId) : "",
-      /* кадр из серии — запасная «обложка» для шапки, если постера нет */
+      /* постер угадывать не будем: реальные картинки приходят из AniList/Shikimori */
+      poster: "",
+      /* кадр из серии — запасная «обложка», если постера нет */
       banner: Array.isArray(item.screenshots) && item.screenshots.length ? String(item.screenshots[0]) : "",
       episodesCount: episodes.length,
       episodes: episodes.map((episode) => ({

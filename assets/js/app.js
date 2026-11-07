@@ -339,10 +339,13 @@ function heroSlideHTML({ anime, label }, index) {
   const watch = episode ? store.watchHref(anime, episode) : `#/anime/${anime.id}`;
   const banner = safeUrl(anime.banner);
   const poster = safeUrl(anime.poster);
-  const bgClass = banner ? "" : poster ? "is-poster" : "";
+  const mediaClass = banner ? "has-banner" : poster ? "is-poster" : "is-empty";
   const bgUrl = (banner || poster).replace(/"/g, "%22");
   return `<article class="hero-slide" data-slide="${index}" aria-hidden="${index !== 0}">
-    <div class="hero-slide-bg ${bgClass}" style="--h:${hueFrom(anime.title)}" data-bg="${attr(bgUrl)}"></div>
+    <div class="hero-media ${mediaClass}" style="--h:${hueFrom(anime.title)}" data-bg="${attr(bgUrl)}">
+      <div class="hero-media-img"></div>
+    </div>
+    <div class="hero-scrim"></div>
     <div class="hero-content">
       <span class="eyebrow">${esc(label)}</span>
       <h2 class="hero-title"><a href="#/anime/${attr(anime.id)}">${esc(anime.title)}</a></h2>
@@ -353,9 +356,9 @@ function heroSlideHTML({ anime, label }, index) {
         <a class="btn btn-ghost" href="#/anime/${attr(anime.id)}">О сериале</a>
       </div>
     </div>
-    <a class="hero-poster" href="#/anime/${attr(anime.id)}" aria-label="${attr(anime.title)}">
+    ${poster ? `<a class="hero-poster" href="#/anime/${attr(anime.id)}" aria-label="${attr(anime.title)}">
       ${ui.posterInner(anime)}
-    </a>
+    </a>` : ""}
   </article>`;
 }
 
@@ -375,7 +378,7 @@ function heroCarouselHTML(releases) {
 }
 
 function applyHeroBackgrounds() {
-  $$("#heroCarousel .hero-slide-bg").forEach((layer) => {
+  $$("#heroCarousel .hero-media").forEach((layer) => {
     const url = layer.dataset.bg;
     if (url) layer.style.setProperty("--hero-img", `url("${url}")`);
   });
@@ -399,9 +402,21 @@ function initHeroCarousel() {
   if (!track || slides.length < 2) return;
 
   let index = 0;
+  let dragging = false;
+  let moved = false;
+  let startX = 0;
+  let startY = 0;
+  let dx = 0;
+  let suppressClick = false;
+
+  const render = () => {
+    track.style.transform = `translate3d(-${index * 100}%, 0, 0)`;
+  };
+
   const go = (next) => {
     index = (next + slides.length) % slides.length;
-    track.style.transform = `translateX(-${index * 100}%)`;
+    track.style.transition = "";
+    render();
     slides.forEach((slide, i) => {
       const active = i === index;
       slide.setAttribute("aria-hidden", String(!active));
@@ -423,25 +438,67 @@ function initHeroCarousel() {
   root.querySelector("[data-hero-next]")?.addEventListener("click", () => { go(index + 1); restart(); });
   dots.forEach((dot) => dot.addEventListener("click", () => { go(Number(dot.dataset.heroDot)); restart(); }));
 
-  root.addEventListener("pointerenter", stop);
-  root.addEventListener("pointerleave", start);
+  root.addEventListener("pointerenter", (event) => { if (event.pointerType === "mouse") stop(); });
+  root.addEventListener("pointerleave", () => { if (!dragging) start(); });
   root.addEventListener("focusin", stop);
   root.addEventListener("focusout", start);
 
-  let startX = null;
-  root.addEventListener("pointerdown", (event) => {
-    if (event.target.closest("a, button")) return;
-    startX = event.clientX;
-  });
-  root.addEventListener("pointerup", (event) => {
-    if (startX === null) return;
-    const delta = event.clientX - startX;
-    startX = null;
-    if (Math.abs(delta) > 45) {
-      go(index + (delta < 0 ? 1 : -1));
-      restart();
+  /* Перетаскивание мышью и пальцем */
+  const endDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    root.classList.remove("is-dragging");
+    const width = root.clientWidth || 1;
+    const threshold = Math.min(90, Math.max(28, width * 0.14));
+    if (moved && Math.abs(dx) > threshold) {
+      go(index + (dx < 0 ? 1 : -1));
+      suppressClick = true;
+      setTimeout(() => { suppressClick = false; }, 60);
+    } else {
+      go(index);
     }
+    dx = 0;
+    moved = false;
+    restart();
+  };
+
+  root.addEventListener("pointerdown", (event) => {
+    if (event.button !== undefined && event.button !== 0) return;
+    if (event.target.closest("button, [data-hero-dot]")) return;
+    dragging = true;
+    moved = false;
+    startX = event.clientX;
+    startY = event.clientY;
+    dx = 0;
+    stop();
+    track.style.transition = "none";
   });
+
+  root.addEventListener("pointermove", (event) => {
+    if (!dragging) return;
+    const deltaX = event.clientX - startX;
+    const deltaY = event.clientY - startY;
+    if (!moved) {
+      if (Math.abs(deltaX) < 6) return;
+      if (Math.abs(deltaY) > Math.abs(deltaX)) { dragging = false; track.style.transition = ""; restart(); return; }
+      moved = true;
+      root.classList.add("is-dragging");
+    }
+    dx = deltaX;
+    const atEdge = (index === 0 && dx > 0) || (index === slides.length - 1 && dx < 0);
+    const offset = atEdge ? dx * 0.32 : dx;
+    track.style.transform = `translate3d(calc(-${index * 100}% + ${offset}px), 0, 0)`;
+  });
+
+  root.addEventListener("pointerup", endDrag);
+  root.addEventListener("pointercancel", endDrag);
+  root.addEventListener("pointerleave", () => { if (dragging) endDrag(); });
+  root.addEventListener("dragstart", (event) => event.preventDefault());
+  root.addEventListener("click", (event) => {
+    if (!suppressClick) return;
+    if (event.target.closest("a")) { event.preventDefault(); event.stopPropagation(); }
+  }, true);
+
   root.addEventListener("keydown", (event) => {
     if (event.key === "ArrowLeft") { go(index - 1); restart(); }
     if (event.key === "ArrowRight") { go(index + 1); restart(); }

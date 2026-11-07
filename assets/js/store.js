@@ -64,6 +64,7 @@ export const DEFAULT_SETTINGS = {
   continueWatching: true,
   playerNote: "",
   customCss: "",
+  kinopoiskToken: "",
 };
 
 export const DEFAULT_GENRES = [

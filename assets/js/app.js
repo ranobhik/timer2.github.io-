@@ -42,6 +42,9 @@ async function boot() {
   }
   render();
   window.addEventListener("hashchange", render);
+  view.addEventListener("click", (event) => {
+    if (event.target.closest("[data-auto-retry]")) loadAutoCatalog(true);
+  });
 
   if (store.getState().loadError) {
     ui.toast("Каталог data/catalog.json не загружен — открыт пустой проект", "err");
@@ -884,18 +887,48 @@ function homeView() {
   setTitle("");
 
   if (!published.length) {
-    view.innerHTML = `<div class="container">
-      <div class="page-head">
-        <span class="eyebrow">${esc(settings().siteName)}</span>
-        <h1>${esc(settings().siteName)}</h1>
-        <p>Каталог пока пуст. Откройте админ-панель и добавьте первое аниме.</p>
-      </div>
-      ${ui.emptyHTML({
+    const voice = esc(settings().kodikTranslation || "Рабочая партия");
+    const states = {
+      loading: {
+        iconName: "download",
+        title: "Собираю тайтлы озвучки",
+        text: `Запрашиваю у Kodik всё, что залито в озвучку «${voice}». Это займёт пару секунд.`,
+        action: "",
+      },
+      empty: {
+        iconName: "info",
+        title: "В озвучке пока нет тайтлов",
+        text: autoError ? esc(autoError) : "Как только серии появятся в плеерах — они появятся и здесь.",
+        action: `<button class="btn" type="button" data-auto-retry>${ui.icon("refresh")} Проверить снова</button>`,
+      },
+      error: {
+        iconName: "x",
+        title: "Не удалось получить список озвучки",
+        text: `${esc(autoError || "Kodik не ответил")}. Проверьте ключи: «Настройки сайта» → «Проверить ключи».`,
+        action: `<button class="btn" type="button" data-auto-retry>${ui.icon("refresh")} Повторить</button>
+          <a class="btn btn-ghost" href="#/admin/settings">${ui.icon("shield")} Настройки</a>`,
+      },
+      off: {
+        iconName: "sparkles",
+        title: "Каталог пуст",
+        text: "Авто-каталог выключен: добавьте тайтлы через админ-панель или включите его в настройках.",
+        action: `<a class="btn" href="#/admin">${ui.icon("shield")} Открыть админ-панель</a>`,
+      },
+      done: {
         iconName: "sparkles",
         title: "Здесь появится аниме",
         text: "Добавьте записи через админ-панель: название, постер, описание, эпизоды и код плеера.",
         action: `<a class="btn" href="#/admin">${ui.icon("shield")} Открыть админ-панель</a>`,
-      })}
+      },
+    };
+    const state = states[autoStatus] || states.done;
+    view.innerHTML = `<div class="container">
+      <div class="page-head">
+        <span class="eyebrow">${esc(settings().siteName)}</span>
+        <h1>${esc(settings().siteName)}</h1>
+        <p>${autoStatus === "loading" ? "Первое включение занимает несколько секунд." : `Тайтлы озвучки «${voice}».`}</p>
+      </div>
+      ${ui.emptyHTML(state)}
     </div>`;
     return;
   }

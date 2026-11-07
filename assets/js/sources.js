@@ -1029,34 +1029,78 @@ function proxied(url, proxy) {
   return proxy ? `${proxy}${encodeURIComponent(url)}` : url;
 }
 
-/* Публичные CORS-прокси: пробуем по очереди, если прямой запрос не прошёл. */
+/* Публичные CORS-прокси: запросы идут параллельно, побеждает первый ответивший. */
 const PUBLIC_PROXIES = [
   "https://api.allorigins.win/raw?url=",
   "https://api.codetabs.com/v1/proxy?quest=",
+  "https://cors.eu.org/",
+  "https://test.cors.workers.dev/?",
 ];
 
-/** Прямой запрос, затем свой прокси (если задан) или публичные по очереди. */
-async function requestWithFallback(url, { proxy = "", timeout = 7000 } = {}) {
-  try {
-    return await request(url, { timeout, cache: false });
-  } catch (error) {
-    const list = proxy ? [proxy] : PUBLIC_PROXIES;
-    for (const candidate of list) {
-      try {
-        const data = await request(proxied(url, candidate), { timeout, cache: false });
-        console.debug("Запрос через прокси:", candidate);
-        return data;
-      } catch (proxyError) {
-        console.debug("Прокси не помог:", candidate, proxyError?.message);
-      }
-    }
-    throw error;
-  }
+/** Короткая понятная причина, если не ответил ни один путь. */
+function pickError(errors) {
+  const list = errors.filter(Boolean);
+  const auth = list.find((item) => /HTTP (401|403)/.test(item));
+  if (auth) return auth;
+  const http = list.find((item) => /HTTP \d{3}/.test(item));
+  if (http) return http;
+  return list[0] || "источник недоступен";
 }
 
-async function kodikRequest(path, params, { proxy = "", timeout = 7000 } = {}) {
+/**
+ * Гонка «напрямую + прокси»: все варианты стартуют одновременно,
+ * возвращается первый успешный ответ. Так ожидание не суммируется.
+ */
+async function raceRequest(url, { proxy = "", timeout = 15000 } = {}) {
+  const candidates = proxy ? [proxy] : PUBLIC_PROXIES;
+  const targets = [
+    { label: "напрямую", url },
+    ...candidates.map((item, index) => ({ label: proxy ? "через свой прокси" : `через прокси №${index + 1}`, url: proxied(url, item) })),
+  ];
+  return new Promise((resolve, reject) => {
+    let pending = targets.length;
+    let finished = false;
+    const errors = [];
+    targets.forEach((target) => {
+      request(target.url, { timeout, cache: false })
+        .then((data) => {
+          if (finished) return;
+          finished = true;
+          resolve(data);
+        })
+        .catch((error) => {
+          pending -= 1;
+          errors.push(`${target.label}: ${error?.message || "ошибка"}`);
+          if (pending === 0 && !finished) {
+            finished = true;
+            reject(new Error(pickError(errors)));
+          }
+        });
+    });
+  });
+}
+
+/** Проверка всех путей до Kodik — для кнопки «Проверить ключи». */
+export async function probeKodik({ token, proxy = "", timeout = 12000 } = {}) {
+  const url = `${KODIK_API}/translations?${new URLSearchParams({ token, limit: "1" }).toString()}`;
+  const candidates = proxy
+    ? [{ label: "свой прокси", url: proxied(url, proxy) }]
+    : PUBLIC_PROXIES.map((item, index) => ({ label: `прокси №${index + 1}`, url: proxied(url, item) }));
+  const targets = [{ label: "напрямую", url }, ...candidates];
+  return Promise.all(targets.map(async (target) => {
+    const started = Date.now();
+    try {
+      const data = await request(target.url, { timeout, cache: false });
+      return { label: target.label, ok: true, ms: Date.now() - started, detail: `озвучек ${(data?.results || []).length}` };
+    } catch (error) {
+      return { label: target.label, ok: false, ms: Date.now() - started, detail: error?.message || "ошибка" };
+    }
+  }));
+}
+
+async function kodikRequest(path, params, { proxy = "", timeout = 15000 } = {}) {
   const direct = `${KODIK_API}${path}?${new URLSearchParams(params).toString()}`;
-  return requestWithFallback(direct, { proxy, timeout });
+  return raceRequest(direct, { proxy, timeout });
 }
 
 function kodikLink(link) {
@@ -1114,9 +1158,9 @@ function normalizeKodik(results) {
   })).filter((item) => item.episodes.length || item.link);
 }
 
-export async function kodikTranslations({ token, proxy = "" } = {}) {
+export async function kodikTranslations({ token, proxy = "", timeout = 20000 } = {}) {
   if (!token) throw new Error("Укажите токен Kodik в «Настройках сайта»");
-  const data = await kodikRequest("/translations", { token, limit: "500" }, { proxy });
+  const data = await kodikRequest("/translations", { token, limit: "500" }, { proxy, timeout });
   return (data?.results || [])
     .map((item) => ({
       id: Number(item?.id) || 0,
@@ -1127,14 +1171,14 @@ export async function kodikTranslations({ token, proxy = "" } = {}) {
 }
 
 /** Ищет плееры по Shikimori ID или названию. */
-export async function kodikSearch({ token, shikimoriId = "", title = "", translationId = "", proxy = "", limit = 100 } = {}) {
+export async function kodikSearch({ token, shikimoriId = "", title = "", translationId = "", proxy = "", limit = 100, timeout = 15000 } = {}) {
   if (!token) throw new Error("Укажите токен Kodik в «Настройках сайта»");
   const params = { token, limit: String(limit), with_episodes: "true" };
   if (shikimoriId) params.shikimori_id = String(shikimoriId);
   else if (title) params.title = title;
   else throw new Error("Нужен Shikimori ID или название");
   if (translationId) params.translation_id = String(translationId);
-  const data = await kodikRequest("/search", params, { proxy });
+  const data = await kodikRequest("/search", params, { proxy, timeout });
   return normalizeKodik(data?.results);
 }
 
@@ -1151,13 +1195,7 @@ export async function kodikList({ token, translationId = "", proxy = "", types =
   }).toString()}`;
 
   for (let page = 0; page < maxPages && url; page += 1) {
-    let data = null;
-    try {
-      data = await request(url, { timeout: 20000, cache: false });
-    } catch (error) {
-      if (!proxy) throw error;
-      data = await request(proxied(url, proxy), { timeout: 20000, cache: false });
-    }
+    const data = await raceRequest(url, { proxy, timeout: 20000 });
     collected.push(...normalizeKodik(data?.results));
     const next = String(data?.next_page || "");
     url = next ? (next.startsWith("http") ? next : `${KODIK_API}${next.startsWith("/") ? "" : "/"}${next}`) : "";
@@ -1173,7 +1211,7 @@ export async function kodikList({ token, translationId = "", proxy = "", types =
 const CVH_API = "https://plapi.cdnvideohub.com/api/v1/player/sv";
 
 async function cvhRequest(url, proxy = "", timeout = 16000) {
-  return requestWithFallback(url, { proxy, timeout });
+  return raceRequest(url, { proxy, timeout });
 }
 
 /** Все серии и озвучки тайтла CVH по его числовому ID. */

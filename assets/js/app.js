@@ -64,16 +64,39 @@ let autoLoaded = false;
 let autoStatus = "idle";
 let autoError = "";
 
-function readAutoCache() {
+function readAutoCache(stale = false) {
   try {
     const raw = window.localStorage.getItem(AUTO_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (!Array.isArray(data?.entries)) return null;
-    if (Date.now() - Number(data.savedAt || 0) > AUTO_TTL) return null;
+    if (!Array.isArray(data?.entries) || !data.entries.length) return null;
+    if (!stale && Date.now() - Number(data.savedAt || 0) > AUTO_TTL) return null;
     return data.entries;
   } catch {
     return null;
+  }
+}
+
+/* ID озвучки в Kodik запоминаем: без этого при каждом открытии нужен /translations */
+const TR_KEY = "rp.kodik-tr.v1";
+const TR_TTL = 7 * 24 * 60 * 60 * 1000;
+
+function readVoiceCache(filter) {
+  try {
+    const data = JSON.parse(window.localStorage.getItem(TR_KEY) || "null");
+    if (!data || data.filter !== filter || !data.id) return null;
+    if (Date.now() - Number(data.savedAt || 0) > TR_TTL) return null;
+    return { id: data.id, title: data.title || filter };
+  } catch {
+    return null;
+  }
+}
+
+function writeVoiceCache(filter, voice) {
+  try {
+    window.localStorage.setItem(TR_KEY, JSON.stringify({ filter, id: voice.id, title: voice.title, savedAt: Date.now() }));
+  } catch {
+    /* приватный режим — не страшно */
   }
 }
 
@@ -117,14 +140,20 @@ async function loadAutoCatalog(force = false) {
   const proxy = String(s.corsProxy || "").trim();
   const filter = String(s.kodikTranslation || "Рабочая партия").trim();
   try {
-    const list = await sources.kodikTranslations({ token: keys.kodikToken, proxy });
-    const found = list.filter((item) => item.title.toLowerCase().includes(filter.toLowerCase()));
+    let found = [];
+    const cachedVoice = readVoiceCache(filter);
+    if (cachedVoice) found = [cachedVoice];
+    else {
+      const list = await sources.kodikTranslations({ token: keys.kodikToken, proxy });
+      found = list.filter((item) => item.title.toLowerCase().includes(filter.toLowerCase()));
+    }
     if (!found.length) {
       autoStatus = "empty";
       autoError = `В Kodik нет озвучки «${filter}»`;
       render();
       return;
     }
+    writeVoiceCache(filter, found[0]);
     const items = await sources.kodikList({ token: keys.kodikToken, translationId: found[0].id, proxy, maxPages: 3 });
     const entries = sources.kodikCatalogEntries(items, { translation: found[0].title });
     writeAutoCache(entries);
@@ -137,9 +166,17 @@ async function loadAutoCatalog(force = false) {
     autoStatus = "done";
     mergeAutoCatalog(entries, true);
   } catch (error) {
-    autoStatus = "error";
     autoError = error?.message || "Kodik недоступен";
     console.debug("Авто-каталог Kodik недоступен:", autoError);
+    /* Kodik не ответил — показываем последний сохранённый список, а не пустой экран */
+    const stale = readAutoCache(true);
+    if (stale?.length) {
+      autoStatus = "done";
+      mergeAutoCatalog(stale, true);
+      ui.toast(`Kodik не ответил (${autoError}) — показан сохранённый список`, "err");
+      return;
+    }
+    autoStatus = "error";
     render();
   }
 }
@@ -904,7 +941,7 @@ function homeView() {
       error: {
         iconName: "x",
         title: "Не удалось получить список озвучки",
-        text: `${esc(autoError || "Kodik не ответил")}. Проверьте ключи: «Настройки сайта» → «Проверить ключи».`,
+        text: `${esc(autoError || "Kodik не ответил")}. Прямой запрос и прокси не сработали — включите VPN или укажите свой CORS-прокси: «Настройки сайта» → «Проверить ключи».`,
         action: `<button class="btn" type="button" data-auto-retry>${ui.icon("refresh")} Повторить</button>
           <a class="btn btn-ghost" href="#/admin/settings">${ui.icon("shield")} Настройки</a>`,
       },

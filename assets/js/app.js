@@ -236,6 +236,7 @@ async function applyShikimoriBatch(entries) {
       entry.rating = Number(info.rating) || entry.rating || 0;
       entry.year = entry.year || info.year;
       entry.status = STATUS_MAP[info.status] || entry.status || "ongoing";
+      entry.totalEpisodes = Number(info.episodes) || entry.totalEpisodes || 0;
       if (!entry.poster && info.poster) entry.poster = info.poster;
       if (Array.isArray(info.genres) && info.genres.length) entry.genres = info.genres;
     }
@@ -288,6 +289,7 @@ async function fillDetailsAndCvh(entries) {
             entry.rating = Number(info.rating) || entry.rating;
             entry.malId = Number(info.malId) || entry.malId || 0;
             entry.status = STATUS_MAP[info.status] || entry.status;
+            entry.totalEpisodes = Number(info.episodes) || entry.totalEpisodes || 0;
             if (!entry.poster && info.poster) entry.poster = info.poster;
             touched = true;
           }
@@ -751,9 +753,31 @@ async function render() {
 /* =======================================================================
    Главная
    ======================================================================= */
+/** Тайтл «в работе»: у нас вышли не все серии озвучки. */
+function inProduction(anime) {
+  const total = Number(anime?.totalEpisodes) || 0;
+  const have = (anime?.episodes || []).length;
+  if (total && have) return have < total;
+  if (anime?.status === "announced") return true;
+  return anime?.status === "ongoing";
+}
+
+/** Сначала то, что озвучиваем сейчас, затем по году выпуска (новые выше). */
+function sortFresh(list) {
+  return [...list].sort((a, b) => {
+    const pa = inProduction(a) ? 0 : 1;
+    const pb = inProduction(b) ? 0 : 1;
+    if (pa !== pb) return pa - pb;
+    const ya = Number(a.year) || 0;
+    const yb = Number(b.year) || 0;
+    if (ya !== yb) return yb - ya;
+    return (Number(b.rating) || 0) - (Number(a.rating) || 0);
+  });
+}
+
 function pickReleases(list) {
-  const featured = list.filter((anime) => anime.featured);
-  const newest = [...list].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const featured = sortFresh(list).filter((anime) => anime.featured);
+  const newest = sortFresh(list);
   const pool = [...featured, ...newest, ...list];
   const seen = new Set();
   const releases = [];
@@ -1163,9 +1187,9 @@ function homeView() {
     })
     .filter((item) => item && item.episode);
 
-  const newest = [...published].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 14);
+  const newest = sortFresh(published).slice(0, 14);
   const topRated = [...published].filter((a) => a.rating > 0).sort((a, b) => b.rating - a.rating).slice(0, 14);
-  const ongoing = published.filter((a) => a.status === "ongoing").slice(0, 14);
+  const ongoing = sortFresh(published.filter(inProduction)).slice(0, 14);
 
   const genreSections = [...store.genreCounts().entries()]
     .filter(([, count]) => count >= 2)
@@ -1173,7 +1197,7 @@ function homeView() {
     .slice(0, 2)
     .map(([genre]) => ({
       genre,
-      list: published.filter((a) => a.genres.includes(genre)).slice(0, 14),
+      list: sortFresh(published.filter((a) => a.genres.includes(genre))).slice(0, 14),
     }));
 
   view.innerHTML = `<div class="container">
@@ -1305,7 +1329,7 @@ function catalogView(query) {
       case "rating": list.sort((a, b) => b.rating - a.rating); break;
       case "title": list.sort((a, b) => a.title.localeCompare(b.title, "ru")); break;
       case "year": list.sort((a, b) => b.year - a.year); break;
-      default: list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+      default: return sortFresh(list);
     }
     return list;
   }

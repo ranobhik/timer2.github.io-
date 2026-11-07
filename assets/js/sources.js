@@ -1033,6 +1033,8 @@ function proxied(url, proxy) {
 const PUBLIC_PROXIES = [
   "https://api.allorigins.win/raw?url=",
   "https://api.codetabs.com/v1/proxy?quest=",
+  "https://api.cors.lol/?url=",
+  "https://corsproxy.io/?url=",
   "https://cors.eu.org/",
   "https://test.cors.workers.dev/?",
 ];
@@ -1108,6 +1110,25 @@ export async function probeKodik({ token, proxy = "", timeout = 12000 } = {}) {
     try {
       const data = await request(target.url, { timeout, cache: false });
       return { label: target.label, ok: true, ms: Date.now() - started, detail: `озвучек ${(data?.results || []).length}` };
+    } catch (error) {
+      return { label: target.label, ok: false, ms: Date.now() - started, detail: error?.message || "ошибка" };
+    }
+  }));
+}
+
+/** Проверка всех путей до CVH — для кнопки «Проверить ключи». */
+export async function probeCvh({ id = "51019", pub = "747", aggr = "mali", proxy = "", timeout = 10000 } = {}) {
+  const url = `${CVH_API}/playlist?pub=${encodeURIComponent(pub)}&aggr=${encodeURIComponent(aggr)}&id=${encodeURIComponent(id)}`;
+  const candidates = proxy
+    ? [{ label: "свой прокси", url: proxied(url, proxy) }]
+    : PUBLIC_PROXIES.map((item, index) => ({ label: `прокси №${index + 1}`, url: proxied(url, item) }));
+  const targets = [{ label: "напрямую", url }, ...candidates];
+  return Promise.all(targets.map(async (target) => {
+    const started = Date.now();
+    try {
+      const data = await request(target.url, { timeout, cache: false });
+      const count = Array.isArray(data?.items) ? data.items.length : 0;
+      return { label: target.label, ok: count > 0, ms: Date.now() - started, detail: `серий ${count}` };
     } catch (error) {
       return { label: target.label, ok: false, ms: Date.now() - started, detail: error?.message || "ошибка" };
     }

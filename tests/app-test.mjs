@@ -181,7 +181,7 @@ check("Авто-каталог: жанры из Shikimori", (autoAnime[0]?.genre
 check("Авто-каталог: оценка из Shikimori", Number(autoAnime[0]?.rating) > 0, String(autoAnime[0]?.rating));
 check("Авто-каталог: MAL ID для CVH", Number(autoAnime[0]?.malId) === 61999, String(autoAnime[0]?.malId));
 
-await wait(900);
+await wait(2000);
 const withCvh = storeMod.getCatalog().anime.find((a) => a.id.startsWith("kodik-"));
 const cvhOnEpisode = (withCvh?.episodes?.[0]?.players || []).some((p) => p.type === "cvh");
 check("CVH: плеер подцепился к серии автоматически", cvhOnEpisode, JSON.stringify(withCvh?.episodes?.[0]?.players?.map((p) => p.type)));

@@ -99,6 +99,50 @@ export async function searchAnime(query) {
   return Array.isArray(list) && list.length ? list[0] : null;
 }
 
+/* Полные данные тайтла кешируем: описание, жанры, MAL ID меняются редко */
+const DETAILS_KEY = "rp.details.v1";
+
+function readDetails() {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(DETAILS_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeDetails(cache) {
+  try {
+    window.localStorage.setItem(DETAILS_KEY, JSON.stringify(cache));
+  } catch {
+    /* нет места — не кешируем */
+  }
+}
+
+export function getCachedDetails(id) {
+  const key = String(id || "").replace(/\D/g, "");
+  if (!key) return null;
+  const item = readDetails()[key];
+  if (!item || !item.at) return null;
+  if (Date.now() - item.at > CACHE_TTL) return null;
+  return item.data || null;
+}
+
+export async function getAnimeDetails(id) {
+  const key = String(id || "").replace(/\D/g, "");
+  if (!key) return null;
+  const cached = getCachedDetails(key);
+  if (cached) return cached;
+  const data = await getAnimeById(key);
+  const mapped = mapShikimori(data);
+  if (mapped) {
+    const cache = readDetails();
+    cache[key] = { at: Date.now(), data: mapped };
+    writeDetails(cache);
+  }
+  return mapped;
+}
+
 /** Пакетная загрузка: /animes?ids=1,2,3 — 30 id за запрос, ответ кешируется в localStorage. */
 export async function getShikimoriBatch(ids = []) {
   const clean = [...new Set((Array.isArray(ids) ? ids : [])
@@ -122,7 +166,10 @@ export async function getShikimoriBatch(ids = []) {
 
 /* ---------- Преобразование ---------- */
 export function pickPoster(data) {
-  return absoluteShikimoriUrl(data?.image?.original || data?.image?.preview || "");
+  const raw = String(data?.image?.original || data?.image?.preview || "");
+  /* Shikimori отдаёт заглушку missing_original.jpg — считаем, что постера нет */
+  if (!raw || /missing_/.test(raw)) return "";
+  return absoluteShikimoriUrl(raw);
 }
 
 function htmlToText(html) {

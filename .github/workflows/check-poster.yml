@@ -1,0 +1,26 @@
+name: check-poster
+on:
+  workflow_dispatch:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Проверить постеры и CORS
+        run: |
+          for id in 16498 5114 21 1535 40748; do
+            echo "== poster $id =="
+            curl -s -o /dev/null -w "status=%{http_code} type=%{content_type} size=%{size_download}\n" -L \
+              -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
+              "https://shikimori.one/system/animes/original/$id.jpg"
+          done
+          echo "== api headers with Origin =="
+          curl -s -D - -o /dev/null -L \
+            -H "Origin: https://ranobhik.github.io" \
+            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
+            "https://shikimori.one/api/animes/16498" | head -40
+          echo "== image headers =="
+          curl -s -D - -o /dev/null -L \
+            -H "Origin: https://ranobhik.github.io" \
+            -H "Referer: https://ranobhik.github.io/" \
+            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
+            "https://shikimori.one/system/animes/original/16498.jpg" | head -30

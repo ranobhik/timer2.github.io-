@@ -154,12 +154,22 @@ function contentTab() {
       </tr>`).join("")
     : `<tr><td colspan="7"><div class="empty" style="border:0;background:none">Пока нет ни одного аниме. Нажмите «Добавить аниме».</div></td></tr>`;
 
+  const published = store.getCatalog();
+  const draftOnly = store.hasDraft() && (published?.anime?.length || 0) === 0 && draftCatalog.anime.length > 0;
+
   return `<div class="stack" style="--gap:14px">
     <div class="notice">
       ${ui.icon("info")}
       <div><strong>Правки сохраняются локально в этом браузере.</strong> Чтобы их увидели посетители, выгрузите
       <code>catalog.json</code> в разделе «Публикация и доступ» и замените файл <code>data/catalog.json</code> в репозитории.</div>
     </div>
+    ${draftOnly ? `<div class="notice">
+      ${ui.icon("info")}
+      <div><strong>Сайт показывает этот черновик, а не авто-каталог озвучки.</strong>
+      В черновике ${draftCatalog.anime.length} тайтлов (остались от старой версии). Если они не нужны —
+      <button class="btn btn-soft btn-sm" type="button" id="dropDraft">${ui.icon("trash")} Убрать черновик</button>
+      </div>
+    </div>` : ""}
     <div class="panel">
     <div class="panel-head">
       <div>
@@ -189,6 +199,15 @@ function contentTab() {
 }
 
 function bindContentTab() {
+  $("#dropDraft")?.addEventListener("click", async () => {
+    if (!window.confirm("Убрать локальный черновик? Сайт вернётся к опубликованному каталогу и авто-каталогу озвучки.")) return;
+    store.discardDraft();
+    await store.loadCatalog();
+    draftCatalog = clone(store.getCatalog());
+    ui.toast("Черновик убран — сайт собирается из озвучки", "ok");
+    ctx.refresh();
+  });
+
   $("#adminSearch")?.addEventListener("input", (event) => {
     const query = event.target.value.trim();
     $$("#adminRows tr[data-row]").forEach((row) => {
@@ -332,6 +351,7 @@ function blankAnime() {
     poster: "",
     banner: "",
     shikimoriId: "",
+    malId: 0,
     cvhId: "",
     studio: "",
     director: "",
@@ -633,9 +653,11 @@ function bindEpisodeControls() {
   const wrap = $("#episodeEditor");
   if (!wrap) return;
 
+  /* Значения уже собраны обработчиком до изменения модели —
+     здесь только перерисовка, иначе правка затирается. */
   const refresh = () => {
-    captureEditorValues();
     const episodesWrap = $("#episodeEditor");
+    if (!episodesWrap) return;
     episodesWrap.innerHTML = editorModel.episodes.map((ep, i) => episodeEditorHTML(ep, i)).join("")
       || '<p class="muted small">Эпизодов нет. Нажмите «Эпизод».</p>';
     bindEpisodeControls();
@@ -834,6 +856,10 @@ function setField(name, value) {
 function applyImportedFields(data, { episodes = true } = {}) {
   if (!data) return;
   if (data.shikimoriId) setField("shikimoriId", data.shikimoriId);
+  if (data.malId && editorModel) {
+    editorModel.malId = Number(data.malId) || 0;
+    editorModel.cvhId = editorModel.cvhId || String(data.malId);
+  }
   setField("poster", data.poster);
   setField("banner", data.banner);
   setField("title", data.title);
@@ -992,6 +1018,8 @@ function createAnimeFromImport(data) {
     poster: data.poster || "",
     banner: data.banner || "",
     shikimoriId: data.shikimoriId || "",
+    malId: Number(data.malId) || 0,
+    cvhId: "",
     studio: data.studio || "",
     country: data.country || "Япония",
     tags: (data.tags || []).filter(Boolean),
@@ -1199,18 +1227,32 @@ async function handleKodikPlayers(btn) {
   }
 }
 
-/** Авто-подстановка плееров сразу после импорта (настройка «Подтягивать плееры»). */
+/** Авто-подстановка плееров и названий серий сразу после импорта. */
 async function autoKodikAfterImport() {
   if (draftCatalog.settings.autoPlayers === false) return;
+  let added = 0;
+  let titled = 0;
   try {
-    const { added } = await attachKodikPlayers();
-    if (added) {
-      const statusEl = document.getElementById("editorStatus");
-      if (statusEl) statusEl.textContent = `Плееры Kodik подставлены автоматически: ${added}`;
-      ui.toast(`Плееры Kodik подставлены: ${added}`, "ok");
-    }
+    const kodik = await attachKodikPlayers();
+    added += kodik.added || 0;
   } catch (error) {
     console.debug("Авто-плееры Kodik:", error?.message);
+  }
+  try {
+    const cvh = await attachCvhPlayers();
+    added += cvh.added || 0;
+    titled += cvh.titled || 0;
+  } catch (error) {
+    console.debug("Авто-плееры CVH:", error?.message);
+  }
+  if (titled && draftCatalog.settings.translateEpisodes !== false) {
+    try { await translateEpisodeTitles(); } catch { /* перевод не критичен */ }
+  }
+  if (added || titled) {
+    renderEpisodesEditor();
+    const statusEl = document.getElementById("editorStatus");
+    if (statusEl) statusEl.textContent = `Автоматически: плееров ${added}, названий серий ${titled}`;
+    ui.toast(`Автоматически: плееров ${added}, названий серий ${titled}`, "ok");
   }
 }
 
@@ -1225,51 +1267,96 @@ function cvhSettings() {
   };
 }
 
-async function handleCvhPlayers(btn) {
+/** ID тайтла в CVH: он же MAL ID. Берём из карточки или из импорта. */
+function cvhTitleId() {
+  const fromField = String(editorModel?.cvhId || "").trim();
+  if (/^\d+$/.test(fromField)) return fromField;
+  const mal = Number(editorModel?.malId) || 0;
+  return mal ? String(mal) : "";
+}
+
+/** Подтягивает плееры CVH нужной озвучки и названия серий. */
+async function attachCvhPlayers() {
   const { filter, pub, aggr, proxy } = cvhSettings();
+  const id = cvhTitleId();
+  if (!id || !editorModel) return { added: 0, titled: 0, reason: "нет ID" };
+
+  const items = await sources.cvhPlaylist({ id, pub, aggr, proxy });
+  const episodes = sources.cvhEpisodes(items, { translation: filter });
+  const anyEpisode = episodes.length ? episodes : sources.cvhEpisodes(items, { translation: "" });
+  if (!anyEpisode.length) return { added: 0, titled: 0, total: items.length };
+
+  editorModel.cvhId = id;
+  const list = Array.isArray(editorModel.episodes) ? editorModel.episodes : [];
+  let added = 0;
+  let titled = 0;
+  anyEpisode.forEach((item) => {
+    const player = {
+      name: `CVH · ${item.studio || "озвучка"}`,
+      type: "cvh",
+      url: sources.cvhPlayerUrl(item.vkId),
+      code: "",
+    };
+    if (attachPlayer(list, item.number, player)) added += 1;
+    if (item.title) {
+      const episode = list.find((ep) => Number(ep.number) === Number(item.number));
+      if (episode && !episode.title) {
+        episode.title = item.title;
+        episode.titleOriginal = "";
+        titled += 1;
+      }
+    }
+  });
+  if (added) editorModel.episodes = list;
+  return { added, titled, total: items.length, matched: episodes.length };
+}
+
+async function handleCvhPlayers(btn) {
   if (editorModel) captureEditorValues();
-  const id = String(editorModel?.cvhId || "").trim();
+  if (!editorModel) return;
+  const id = cvhTitleId();
   if (!id) {
-    ui.toast("Укажите «ID в CVH» — он виден в ссылке плеера на сайтах, где стоит CVH", "err");
+    ui.toast("Сначала импортируйте тайтл — ID в CVH совпадает с MAL ID и подставится сам", "err");
     return;
   }
   const original = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = "Ищу плееры…";
   try {
-    const items = await sources.cvhPlaylist({ id, pub, aggr, proxy });
-    const studios = sources.cvhStudios(items);
-    const matched = filter
-      ? items.filter((item) => item.studio.toLowerCase().includes(filter))
-      : items;
-    if (!matched.length) {
-      ui.toast(studios.length
-        ? `В CVH есть озвучки: ${studios.slice(0, 6).map((x) => x.studio).join(", ")}`
-        : "CVH не отдал серии для этого ID", "err");
+    const { added, titled, total } = await attachCvhPlayers();
+    if (!total) {
+      ui.toast("CVH не знает этот тайтл", "err");
       return;
     }
-    const episodes = Array.isArray(editorModel.episodes) ? editorModel.episodes : [];
-    let added = 0;
-    matched.forEach((item) => {
-      const player = {
-        name: `CVH · ${item.studio}${item.voiceType ? ` (${item.voiceType})` : ""}`,
-        type: "cvh",
-        url: sources.cvhPlayerUrl(item.vkId),
-        code: "",
-      };
-      if (attachPlayer(episodes, item.episode, player)) added += 1;
-    });
-    editorModel.episodes = episodes;
+    if (titled && draftCatalog.settings.translateEpisodes !== false) await translateEpisodeTitles();
     renderEpisodesEditor();
     const statusEl = document.getElementById("editorStatus");
-    if (statusEl) statusEl.textContent = `Плееры CVH: добавлено ${added} — не забудьте сохранить`;
-    ui.toast(added ? `Добавлено плееров CVH: ${added}` : "Все плееры уже на месте", added ? "ok" : "info");
+    if (statusEl) statusEl.textContent = `CVH: плееров ${added}, названий серий ${titled}`;
+    ui.toast(`CVH: плееров ${added}, названий серий ${titled}`, added || titled ? "ok" : "info");
   } catch (error) {
     ui.toast(error?.message || "Не удалось получить плееры CVH", "err");
   } finally {
     btn.disabled = false;
     btn.innerHTML = original;
   }
+}
+
+/** Переводит названия серий карточки на русский. */
+async function translateEpisodeTitles() {
+  if (!editorModel?.episodes?.length) return 0;
+  const titles = editorModel.episodes.map((ep) => ep.title).filter(Boolean);
+  if (!titles.length) return 0;
+  const map = await sources.translateTitles(titles);
+  let changed = 0;
+  editorModel.episodes.forEach((ep) => {
+    const translated = ep.title ? map[ep.title] : "";
+    if (translated && translated !== ep.title) {
+      ep.titleOriginal = ep.titleOriginal || ep.title;
+      ep.title = translated;
+      changed += 1;
+    }
+  });
+  return changed;
 }
 
 /* ---------- Проверка ключей API ---------- */
@@ -1356,21 +1443,13 @@ async function handleTranslateTitles(btn) {
   btn.disabled = true;
   btn.innerHTML = "Перевожу…";
   try {
-    const titles = editorModel.episodes.map((ep) => ep.title).filter(Boolean);
-    if (!titles.length) {
-      ui.toast("Названий серий нет — впишите вручную или подтяните из базы", "err");
+    const changed = await translateEpisodeTitles();
+    if (!changed) {
+      ui.toast("Переводить нечего: названий серий нет или они уже по-русски", "err");
       return;
     }
-    const map = await sources.translateTitles(titles);
-    editorModel.episodes.forEach((ep) => {
-      const translated = map[ep.title];
-      if (translated && translated !== ep.title) {
-        ep.titleOriginal = ep.titleOriginal || ep.title;
-        ep.title = translated;
-      }
-    });
     renderEpisodesEditor();
-    ui.toast("Названия переведены", "ok");
+    ui.toast(`Названий переведено: ${changed}`, "ok");
   } catch (error) {
     ui.toast(error?.message || "Не удалось перевести", "err");
   } finally {

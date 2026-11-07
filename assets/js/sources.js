@@ -1033,11 +1033,10 @@ function proxied(url, proxy) {
 const PUBLIC_PROXIES = [
   "https://api.allorigins.win/raw?url=",
   "https://api.codetabs.com/v1/proxy?quest=",
-  "https://corsproxy.io/?url=",
 ];
 
 /** Прямой запрос, затем свой прокси (если задан) или публичные по очереди. */
-async function requestWithFallback(url, { proxy = "", timeout = 16000 } = {}) {
+async function requestWithFallback(url, { proxy = "", timeout = 7000 } = {}) {
   try {
     return await request(url, { timeout, cache: false });
   } catch (error) {
@@ -1055,7 +1054,7 @@ async function requestWithFallback(url, { proxy = "", timeout = 16000 } = {}) {
   }
 }
 
-async function kodikRequest(path, params, { proxy = "", timeout = 16000 } = {}) {
+async function kodikRequest(path, params, { proxy = "", timeout = 7000 } = {}) {
   const direct = `${KODIK_API}${path}?${new URLSearchParams(params).toString()}`;
   return requestWithFallback(direct, { proxy, timeout });
 }
@@ -1190,6 +1189,7 @@ export async function cvhPlaylist({ id, pub = "747", aggr = "mali", proxy = "" }
       vkId: String(item?.vkId || ""),
       studio: String(item?.voiceStudio || "").trim(),
       voiceType: String(item?.voiceType || "").trim(),
+      title: String(item?.name || "").trim(),
       season: Number(item?.season) || 1,
       episode: Number(item?.episode) || 1,
     }))
@@ -1224,6 +1224,31 @@ export async function cvhVideo({ vkId, proxy = "" } = {}) {
     poster: data?.thumbUrl || "",
     duration: Number(data?.duration) || 0,
   };
+}
+
+/**
+ * Серии CVH для нужной озвучки: [{ number, title, vkId, studio }].
+ * В CVH идентификатор тайтла совпадает с MAL ID.
+ */
+export function cvhEpisodes(items = [], { translation = "", limit = 500 } = {}) {
+  const wanted = String(translation || "").trim().toLowerCase();
+  const byNumber = new Map();
+  items.forEach((item) => {
+    const studio = String(item?.studio || "").toLowerCase();
+    if (wanted && !studio.includes(wanted)) return;
+    const number = Number(item?.episode) || 0;
+    if (!number || !item?.vkId) return;
+    const existing = byNumber.get(number);
+    // Серия уже есть с названием — вторую копию не берём
+    if (existing && (existing.title || !item.title)) return;
+    byNumber.set(number, {
+      number,
+      title: String(item.title || "").trim(),
+      vkId: String(item.vkId),
+      studio: item.studio || "",
+    });
+  });
+  return [...byNumber.values()].sort((a, b) => a.number - b.number).slice(0, limit);
 }
 
 /** Игрок типа cvh хранит в url только идентификатор видео: cvh:<vkId>. */

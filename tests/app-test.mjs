@@ -30,7 +30,7 @@ const SHIKI_FULL = {
   aired_on: "2026-10-10", rating: "r", english: ["The Vermilion Mask"], japanese: ["朱色の仮面"],
   synonyms: [], duration: 23, myanimelist_id: 61999,
   description_html: "<div>Перу — молодой подмастерье мастера масок.<br>Он надевает «Маску бога войны».</div>",
-  genres: [], studios: [{ name: "100studio" }],
+  genres: [{ id: 1, name: "Action", russian: "Экшен" }, { id: 2, name: "Drama", russian: "Драма" }], studios: [{ name: "100studio" }],
   screenshots: [{ original: "/system/screenshots/original/aa.png" }], videos: [],
 };
 const ANILIST_MEDIA = {
@@ -60,6 +60,12 @@ window.fetch = async (url, opts = {}) => {
   else if (/graphql\.anilist\.co/.test(u)) { body = { data: { Media: ANILIST_MEDIA, Page: { media: [ANILIST_MEDIA] } } }; status = 200; }
   else if (/api\.jikan\.moe\/v4\/anime\/61999\/episodes/.test(u)) { body = JIKAN_EPISODES; status = 200; }
   else if (/api\.jikan\.moe\/v4\/anime\/61999/.test(u)) { body = { data: { mal_id: 61999, title: "Shuiro no Kamen", episodes: 12 } }; status = 200; }
+  else if (u.includes("plapi.cdnvideohub.com") && u.includes("/playlist")) {
+    body = { items: [
+      { cvhId: "x", vkId: "111", voiceStudio: "Рабочая партия", voiceType: "Дубляж", season: 1, episode: 1, name: "Маска бога войны" },
+      { cvhId: "y", vkId: "222", voiceStudio: "Рабочая партия", voiceType: "Дубляж", season: 1, episode: 2, name: "Дымная маска" },
+    ] }; status = 200;
+  }
   else if (u.includes("plapi.cdnvideohub.com")) {
     body = { duration: 1400, sources: { mpegFullHdUrl: "https://vd.okcdn.ru/1080", mpegHighUrl: "https://vd.okcdn.ru/720" } };
     status = 200;
@@ -169,6 +175,17 @@ const autoAnime = storeMod.getCatalog().anime.filter((a) => a.id.startsWith("kod
 check("Авто-каталог: карточка из Kodik", autoAnime.length === 1, String(autoAnime.length));
 check("В каталоге только тайтлы озвучки", storeMod.getCatalog().anime.every((a) => a.id.startsWith("kodik-")), String(storeMod.getCatalog().anime.length));
 check("Авто-каталог: плееры в сериях", autoAnime[0]?.episodes?.[0]?.players?.[0]?.type === "iframe", JSON.stringify(autoAnime[0]?.episodes?.[0]?.players));
+check("Авто-каталог: ссылка плеера рабочая", /^https:\/\/kodikplayer\.com\//.test(autoAnime[0]?.episodes?.[0]?.players?.[0]?.url || ""), autoAnime[0]?.episodes?.[0]?.players?.[0]?.url);
+check("Авто-каталог: описание из Shikimori", /Перу/.test(autoAnime[0]?.description || ""), (autoAnime[0]?.description || "").slice(0, 40));
+check("Авто-каталог: жанры из Shikimori", (autoAnime[0]?.genres || []).includes("Экшен"), JSON.stringify(autoAnime[0]?.genres));
+check("Авто-каталог: оценка из Shikimori", Number(autoAnime[0]?.rating) > 0, String(autoAnime[0]?.rating));
+check("Авто-каталог: MAL ID для CVH", Number(autoAnime[0]?.malId) === 61999, String(autoAnime[0]?.malId));
+
+await wait(900);
+const withCvh = storeMod.getCatalog().anime.find((a) => a.id.startsWith("kodik-"));
+const cvhOnEpisode = (withCvh?.episodes?.[0]?.players || []).some((p) => p.type === "cvh");
+check("CVH: плеер подцепился к серии автоматически", cvhOnEpisode, JSON.stringify(withCvh?.episodes?.[0]?.players?.map((p) => p.type)));
+check("CVH: название серии из CVH", /Маска бога войны/.test(withCvh?.episodes?.[0]?.title || ""), withCvh?.episodes?.[0]?.title);
 
 /* CVH-плеер на публичной странице */
 const ui = await import(`${ROOT}/assets/js/ui.js`);

@@ -238,6 +238,16 @@ const voiceList = [{ id: 3466, title: "Рабочая\u00a0партия" }, { id
 check("Поиск озвучки в списке", sources.matchVoice(voiceList, "Рабочая партия")?.id === 3466, JSON.stringify(sources.matchVoice(voiceList, "Рабочая партия")));
 check("Подсказка похожих озвучек", sources.suggestVoices(voiceList, "Рабочая партия").length === 1, JSON.stringify(sources.suggestVoices(voiceList, "Рабочая партия")));
 
+/* Новый API отдаёт серии строкой, старый — объектом */
+const stringSeasons = sources.kodikEpisodes({
+  seasons: { 1: { episodes: { 1: "//kodikplayer.com/seria/1/a/720p", 2: "//kodikplayer.com/seria/2/b/720p" } } },
+});
+check("Серии Kodik: ссылки строками", stringSeasons.length === 2 && stringSeasons[0].link === "https://kodikplayer.com/seria/1/a/720p", JSON.stringify(stringSeasons));
+const objectSeasons = sources.kodikEpisodes({
+  seasons: { 1: { episodes: { 1: { link: "//kodik.info/seria/1/a/720p" } } } },
+});
+check("Серии Kodik: ссылки объектами", objectSeasons.length === 1 && objectSeasons[0].link === "https://kodikplayer.com/seria/1/a/720p", JSON.stringify(objectSeasons));
+
 /* Смена доменов Kodik в 2026: старые ссылки чинятся на лету */
 check("Kodik: старый домен → kodikplayer", sources.modernizeKodikUrl("https://kodik.info/seria/1/a/720p") === "https://kodikplayer.com/seria/1/a/720p");
 check("Kodik: протокол-относительная ссылка", sources.modernizeKodikUrl("//kodik.biz/serial/2/b/720p") === "https://kodikplayer.com/serial/2/b/720p");

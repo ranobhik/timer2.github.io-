@@ -1187,7 +1187,7 @@ function normalizeKodik(results) {
 
 export async function kodikTranslations({ token, proxy = "", timeout = 20000 } = {}) {
   if (!token) throw new Error("Укажите токен Kodik в «Настройках сайта»");
-  const data = await kodikRequest("/translations", { token, limit: "500" }, { proxy, timeout });
+  const data = await kodikRequest("/translations", { token }, { proxy, timeout });
   return (data?.results || [])
     .map((item) => ({
       id: Number(item?.id) || 0,
@@ -1346,10 +1346,53 @@ export function translitSlug(text) {
 }
 
 /** Совпадает ли озвучка элемента Kodik с фильтром («Рабочая партия»). */
+/* Название озвучки сравниваем «по-человечески»: регистр, неразрывные пробелы,
+   кавычки, тире и лишние пробелы не должны мешать. «Рабочая партия» = «Рабочая Партия». */
+export function normalizeVoiceName(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[\u00a0\u2007\u2009\u200b\u202f\ufeff]/g, " ")
+    .replace(/[«»"'`.,:;!?()[\]{}\/\\|—–−]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Находит озвучку в списке Kodik: точное совпадение → вхождение → все слова. */
+export function matchVoice(list, filter) {
+  const wanted = normalizeVoiceName(filter);
+  const items = (Array.isArray(list) ? list : []).filter((item) => item && item.title);
+  if (!items.length) return null;
+  if (!wanted) return items[0];
+  const scored = items.map((item) => ({ item, key: normalizeVoiceName(item.title) }));
+  const exact = scored.find((entry) => entry.key === wanted);
+  if (exact) return exact.item;
+  const inside = scored.find((entry) => entry.key.includes(wanted) || (wanted.includes(entry.key) && entry.key.length > 3));
+  if (inside) return inside.item;
+  const tokens = wanted.split(" ").filter(Boolean);
+  const byTokens = scored.find((entry) => tokens.every((token) => entry.key.includes(token)));
+  return byTokens ? byTokens.item : null;
+}
+
+/** Похожие названия — чтобы подсказать, как озвучка записана в Kodik. */
+export function suggestVoices(list, filter, limit = 4) {
+  const wanted = normalizeVoiceName(filter);
+  const tokens = wanted.split(" ").filter((token) => token.length > 2);
+  const seen = new Set();
+  const out = [];
+  (Array.isArray(list) ? list : []).forEach((item) => {
+    const key = normalizeVoiceName(item?.title);
+    if (!key || seen.has(key)) return;
+    if (tokens.length && !tokens.some((token) => key.includes(token))) return;
+    seen.add(key);
+    out.push(item.title);
+  });
+  return out.slice(0, limit);
+}
+
 export function kodikMatchesTranslation(item, filter) {
-  const wanted = String(filter || "").trim().toLowerCase();
+  const wanted = normalizeVoiceName(filter);
   if (!wanted) return true;
-  const name = String(item?.translation?.title || "").trim().toLowerCase();
+  const name = normalizeVoiceName(item?.translation?.title);
   if (!name) return false;
   return name.includes(wanted) || (wanted.includes(name) && name.length > 3);
 }

@@ -67,6 +67,8 @@ export const DEFAULT_SETTINGS = {
   kinopoiskToken: "",
   kodikToken: "",
   kodikTranslation: "Рабочая партия",
+  /* ID озвучки «Рабочая партия» в Kodik — по нему каталог собирается без поиска по названию */
+  kodikTranslationId: "3466",
   cvhPub: "747",
   cvhAggr: "mali",
   cvhTranslation: "Рабочая партия",

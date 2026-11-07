@@ -1136,15 +1136,16 @@ function kodikSettings() {
   const settings = draftCatalog.settings || {};
   return {
     token: apiKeys().kodikToken,
-    filter: String(settings.kodikTranslation || "Рабочая партия").trim().toLowerCase(),
+    filter: String(settings.kodikTranslation || "Рабочая партия").trim(),
+    translationId: String(settings.kodikTranslationId || "").trim(),
     proxy: String(settings.corsProxy || "").trim(),
   };
 }
 
-function translationMatches(item, filter) {
+function translationMatches(item, filter, translationId = "") {
+  if (translationId && String(item?.translation?.id || "") === String(translationId)) return true;
   if (!filter) return true;
-  const name = String(item?.translation?.title || "").toLowerCase();
-  return name.includes(filter) || filter.includes(name) && name.length > 3;
+  return sources.kodikMatchesTranslation(item, filter);
 }
 
 /** Плееры Kodik для серии: тип iframe, ссылка на конкретную серию. */
@@ -1174,7 +1175,7 @@ function attachPlayer(episodes, number, player) {
 
 /** Подтягивает плееры Kodik в текущую карточку. Возвращает { added, total }. */
 async function attachKodikPlayers() {
-  const { token, filter, proxy } = kodikSettings();
+  const { token, filter, translationId, proxy } = kodikSettings();
   if (!token || !editorModel) return { added: 0, total: 0, reason: "нет токена" };
   const results = await sources.kodikSearch({
     token,
@@ -1182,7 +1183,7 @@ async function attachKodikPlayers() {
     title: editorModel.shikimoriId ? "" : (editorModel.originalTitle || editorModel.title),
     proxy,
   });
-  const matched = results.filter((item) => translationMatches(item, filter));
+  const matched = results.filter((item) => translationMatches(item, filter, translationId));
   const episodes = Array.isArray(editorModel.episodes) ? editorModel.episodes : [];
   let added = 0;
   matched.forEach((item) => {
@@ -1408,6 +1409,18 @@ async function handleCheckKeys(btn) {
       probes.forEach((probe) => line(probe.ok, `Kodik ${probe.label}: ${probe.detail} (${probe.ms} мс)`));
       if (!probes.some((probe) => probe.ok)) {
         line(false, "Kodik: ни один путь не работает — включите VPN или впишите свой CORS-прокси");
+      } else {
+        const voiceId = String(settings.kodikTranslationId || "").trim();
+        if (voiceId) {
+          try {
+            const items = await sources.kodikList({ token: keys.kodikToken, translationId: voiceId, proxy, maxPages: 1 });
+            line(items.length > 0, `Озвучка «${settings.kodikTranslation || "Рабочая партия"}» (ID ${voiceId}): тайтлов ${items.length}`);
+          } catch (error) {
+            line(false, `Озвучка ID ${voiceId}: ${error?.message || "ошибка запроса"}`);
+          }
+        } else {
+          line(false, "ID озвучки в Kodik не задан — каталог будет искать её по названию");
+        }
       }
     }
     try {
@@ -1829,15 +1842,20 @@ async function handleKodikSync(btn) {
   try {
     say("Ищу озвучку в Kodik…");
     const translations = await sources.kodikTranslations({ token, proxy });
-    const found = translations.filter((item) => item.title.toLowerCase().includes(filter));
-    if (!found.length) {
-      const sample = translations.slice(0, 8).map((item) => item.title).join(", ");
-      say(`Озвучка «${draftCatalog.settings.kodikTranslation}» не найдена. В Kodik есть, например: ${sample || "—"}`);
+    const explicitId = String(draftCatalog.settings.kodikTranslationId || "").trim();
+    const voice = explicitId
+      ? { id: explicitId, title: draftCatalog.settings.kodikTranslation || "Kodik" }
+      : sources.matchVoice(translations, filter);
+    if (!voice) {
+      const hints = sources.suggestVoices(translations, filter);
+      say(hints.length
+        ? `Озвучка «${draftCatalog.settings.kodikTranslation}» не найдена. Похожие: ${hints.join(", ")}. Скопируйте название точно как в Kodik или укажите ID озвучки.`
+        : `Озвучка «${draftCatalog.settings.kodikTranslation}» не найдена. Проверьте название или укажите ID озвучки.`);
       return;
     }
-    say(`Озвучка: ${found.map((item) => item.title).join(", ")}. Загружаю список тайтлов…`);
+    say(`Озвучка: ${voice.title}. Загружаю список тайтлов…`);
 
-    const items = await sources.kodikList({ token, translationId: found[0].id, proxy });
+    const items = await sources.kodikList({ token, translationId: voice.id, proxy });
     say(`Тайтлов у озвучки: ${items.length}. Раскладываю по каталогу…`);
 
     let created = 0;
@@ -2152,6 +2170,11 @@ function settingsTab() {
           <p class="hint">Фильтр по названию озвучки — подставляются только её плееры.</p>
         </div>
         <div class="field">
+          <label for="s-kodik-translation-id">ID озвучки в Kodik <small>необязательно</small></label>
+          <input id="s-kodik-translation-id" name="kodikTranslationId" type="text" value="${attr(s.kodikTranslationId || "")}" placeholder="3466" autocomplete="off" />
+          <p class="hint">ID «Рабочей партии» — 3466. С ним каталог собирается сразу, без поиска по названию.</p>
+        </div>
+        <div class="field">
           <label for="s-cvh-translation">Озвучка в CVH</label>
           <input id="s-cvh-translation" name="cvhTranslation" type="text" value="${attr(s.cvhTranslation || "Рабочая партия")}" placeholder="Рабочая партия" autocomplete="off" />
           <p class="hint">CVH (CDNVideoHub) — плеер, который использует Shikimori.</p>
@@ -2331,6 +2354,7 @@ function bindSettingsTab() {
       ...draftCatalog.settings,
       siteName: get("siteName").trim() || "Аниме-портал",
       kodikTranslation: get("kodikTranslation").trim() || "Рабочая партия",
+      kodikTranslationId: get("kodikTranslationId").trim(),
       cvhTranslation: get("cvhTranslation").trim() || "Рабочая партия",
       cvhPub: get("cvhPub").trim() || "747",
       cvhAggr: get("cvhAggr").trim() || "mali",

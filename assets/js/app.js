@@ -139,27 +139,39 @@ async function loadAutoCatalog(force = false) {
 
   const proxy = String(s.corsProxy || "").trim();
   const filter = String(s.kodikTranslation || "Рабочая партия").trim();
+  const explicitId = String(s.kodikTranslationId || "").trim();
   try {
-    let found = [];
-    const cachedVoice = readVoiceCache(filter);
-    if (cachedVoice) found = [cachedVoice];
-    else {
+    let voice = explicitId ? { id: explicitId, title: filter } : readVoiceCache(filter);
+    if (!voice) {
       const list = await sources.kodikTranslations({ token: keys.kodikToken, proxy });
-      found = list.filter((item) => item.title.toLowerCase().includes(filter.toLowerCase()));
+      voice = sources.matchVoice(list, filter);
+      if (!voice) {
+        const hints = sources.suggestVoices(list, filter);
+        autoStatus = "empty";
+        autoError = hints.length
+          ? `В Kodik нет озвучки «${filter}». Похожие: ${hints.join(", ")}. Впишите название точно как в Kodik или укажите её ID в «Настройках сайта».`
+          : `В Kodik нет озвучки «${filter}». Проверьте название в «Настройках сайта» или укажите ID озвучки.`;
+        render();
+        return;
+      }
+      writeVoiceCache(filter, voice);
     }
-    if (!found.length) {
-      autoStatus = "empty";
-      autoError = `В Kodik нет озвучки «${filter}»`;
-      render();
-      return;
+    let items = await sources.kodikList({ token: keys.kodikToken, translationId: voice.id, proxy, maxPages: 3 });
+    if (!items.length && explicitId) {
+      /* ID мог устареть — пробуем найти озвучку по названию */
+      const list = await sources.kodikTranslations({ token: keys.kodikToken, proxy });
+      const fallbackVoice = sources.matchVoice(list, filter);
+      if (fallbackVoice) {
+        voice = fallbackVoice;
+        writeVoiceCache(filter, voice);
+        items = await sources.kodikList({ token: keys.kodikToken, translationId: voice.id, proxy, maxPages: 3 });
+      }
     }
-    writeVoiceCache(filter, found[0]);
-    const items = await sources.kodikList({ token: keys.kodikToken, translationId: found[0].id, proxy, maxPages: 3 });
-    const entries = sources.kodikCatalogEntries(items, { translation: found[0].title });
+    const entries = sources.kodikCatalogEntries(items, { translation: voice.title });
     writeAutoCache(entries);
     if (!entries.length) {
       autoStatus = "empty";
-      autoError = `У озвучки «${found[0].title}» пока нет серий`;
+      autoError = `В озвучке «${voice.title}» пока нет тайтлов с сериями`;
       render();
       return;
     }
@@ -936,7 +948,8 @@ function homeView() {
         iconName: "info",
         title: "В озвучке пока нет тайтлов",
         text: autoError ? esc(autoError) : "Как только серии появятся в плеерах — они появятся и здесь.",
-        action: `<button class="btn" type="button" data-auto-retry>${ui.icon("refresh")} Проверить снова</button>`,
+        action: `<button class="btn" type="button" data-auto-retry>${ui.icon("refresh")} Проверить снова</button>
+          <a class="btn btn-ghost" href="#/admin/settings">${ui.icon("shield")} Настройки</a>`,
       },
       error: {
         iconName: "x",

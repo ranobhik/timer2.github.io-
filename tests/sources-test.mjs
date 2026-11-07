@@ -230,6 +230,14 @@ const exported = JSON.parse(store.exportJSON({ settings: { kodikToken: "secret",
 check("Токены не публикуются", !exported.settings.kodikToken && !exported.settings.kinopoiskToken, JSON.stringify(exported.settings));
 check("Остальные настройки сохраняются", exported.settings.title === "x", JSON.stringify(exported.settings));
 
+/* Название озвучки: неразрывный пробел, кавычки и регистр не мешают */
+check("Озвучка: неразрывный пробел", sources.kodikMatchesTranslation({ translation: { title: "Рабочая\u00a0партия" } }, "Рабочая партия"));
+check("Озвучка: «ёлочки» и регистр", sources.kodikMatchesTranslation({ translation: { title: "«Рабочая Партия»" } }, "рабочая партия"));
+check("Озвучка: двойной пробел", sources.kodikMatchesTranslation({ translation: { title: "Рабочая  партия" } }, "Рабочая партия"));
+const voiceList = [{ id: 3466, title: "Рабочая\u00a0партия" }, { id: 610, title: "AniLibria" }];
+check("Поиск озвучки в списке", sources.matchVoice(voiceList, "Рабочая партия")?.id === 3466, JSON.stringify(sources.matchVoice(voiceList, "Рабочая партия")));
+check("Подсказка похожих озвучек", sources.suggestVoices(voiceList, "Рабочая партия").length === 1, JSON.stringify(sources.suggestVoices(voiceList, "Рабочая партия")));
+
 /* Смена доменов Kodik в 2026: старые ссылки чинятся на лету */
 check("Kodik: старый домен → kodikplayer", sources.modernizeKodikUrl("https://kodik.info/seria/1/a/720p") === "https://kodikplayer.com/seria/1/a/720p");
 check("Kodik: протокол-относительная ссылка", sources.modernizeKodikUrl("//kodik.biz/serial/2/b/720p") === "https://kodikplayer.com/serial/2/b/720p");

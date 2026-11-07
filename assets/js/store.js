@@ -166,6 +166,8 @@ export function normalizeAnime(raw, index = 0) {
     featured: item.featured === true,
     createdAt: String(item.createdAt || new Date().toISOString()),
     totalEpisodes: Number(item.totalEpisodes) || 0,
+    episodesAired: Number(item.episodesAired) || 0,
+    kind: String(item.kind || ""),
     sourceUpdatedAt: String(item.sourceUpdatedAt || ""),
     uploadedAt: String(item.uploadedAt || ""),
     episodes,
@@ -493,16 +495,25 @@ export const ABANDON_DAYS = 90;
 
 /**
  * Заброшенная озвучка: вышли не все серии, и давно ничего не заливали.
- * Нужен известный общий счётчик серий — иначе не угадываем и тайтл оставляем.
+ * Сравниваем с числом вышедших серий (episodesAired), иначе с общим счётом.
  */
 export function isAbandoned(anime, now = Date.now(), days = ABANDON_DAYS) {
-  const total = Number(anime?.totalEpisodes) || 0;
-  if (!total) return false;
   const have = (anime?.episodes || []).length;
-  if (have >= total) return false;
-  const stamp = Date.parse(String(anime?.sourceUpdatedAt || "").trim().replace(" ", "T"));
-  if (!Number.isFinite(stamp)) return false;
-  return now - stamp > days * 86400000;
+  if (!have) return false;
+  const aired = Number(anime?.episodesAired) || 0;
+  const total = Number(anime?.totalEpisodes) || 0;
+  /* сравниваем с тем, что уже вышло: для онгоинга это честнее, чем план сезона */
+  const expected = aired || total;
+  const raw = anime?.sourceUpdatedAt || anime?.uploadedAt || "";
+  const stamp = Date.parse(String(raw).trim().replace(" ", "T"));
+  const stale = Number.isFinite(stamp) ? now - stamp > days * 86400000 : false;
+
+  if (expected) return have < expected && stale;
+
+  /* счётчиков нет: завершённый тайтл с одной серией и давно без обновлений — заброшен */
+  const film = /фильм|movie|спешл|special|ona|ova/i.test(String(anime?.kind || ""));
+  if (!film && anime?.status === "released" && have <= 1 && Number.isFinite(stamp)) return stale;
+  return false;
 }
 
 export function publicAnime() {

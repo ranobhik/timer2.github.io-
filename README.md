@@ -230,7 +230,7 @@ CVH — тот же плеер, который стоит на Shikimori. У н�
 - **Код вставки (embed)** — вставьте готовый HTML от плеера, включая `<script>`:
 
   ```html
-  <iframe src="https://kodik.info/serial/12345/abcdef/720p"
+  <iframe src="https://kodikplayer.com/serial/12345/abcdef/720p"
           allowfullscreen allow="autoplay; fullscreen"></iframe>
   ```
 

@@ -61,8 +61,8 @@ window.fetch = async (url) => {
     status = 200;
   }
   else if (/api\.jikan\.moe\/v4\/anime\/61999/.test(u)) { body = { data: { mal_id: 61999, title: "Shuiro no Kamen", episodes: 12 } }; status = 200; }
-  else if (/kodikapi\.com\/translations/.test(u)) { body = { results: [{ id: 777, title: "Рабочая партия", type: "voice" }] }; status = 200; }
-  else if (/kodikapi\.com\/(search|list)/.test(u)) { body = { results: [KODIK_ITEM], next_page: "" }; status = 200; }
+  else if (/kodik-?api\.com\/translations/.test(u)) { body = { results: [{ id: 777, title: "Рабочая партия", type: "voice" }] }; status = 200; }
+  else if (/kodik-?api\.com\/(search|list)/.test(u)) { body = { results: [KODIK_ITEM], next_page: "" }; status = 200; }
   else if (/plapi\.cdnvideohub\.com.*playlist/.test(u)) {
     body = { items: [
       { cvhId: "a", vkId: "111", voiceStudio: "Рабочая партия", voiceType: "Дубляж", season: 1, episode: 1, name: "The Mask of the God of War" },

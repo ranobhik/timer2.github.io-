@@ -420,7 +420,7 @@ function playerEditorHTML(player, epIndex, plIndex) {
       </div>
       <div class="field span-2${player.type === "html" ? "" : " hide"}" data-pl-code>
         <label>Код вставки <small>HTML/iframe от плеера</small></label>
-        <textarea data-pl-field="code" rows="4" placeholder='&lt;iframe src="https://kodik.info/…" allowfullscreen&gt;&lt;/iframe&gt;'>${esc(player.code)}</textarea>
+        <textarea data-pl-field="code" rows="4" placeholder='&lt;iframe src="https://kodikplayer.com/…" allowfullscreen&gt;&lt;/iframe&gt;'>${esc(player.code)}</textarea>
       </div>
     </div>
     ${player.type === "demo" ? `<p class="hint">Заглушка: на сайте покажется «Плеер ещё не подключён». Выберите тип и добавьте ссылку или код.</p>` : ""}

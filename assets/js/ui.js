@@ -1,6 +1,7 @@
 /* Компоненты интерфейса: карточки, постеры, плеер, тосты. */
 
 import { getCatalog, isFavorite } from "./store.js";
+import { modernizeKodikUrl } from "./sources.js";
 import { attr, esc, hueFrom, initials, pluralEpisodes, safeUrl, statusLabel } from "./utils.js";
 
 export const icon = (name, cls = "") =>
@@ -157,7 +158,7 @@ export function mountPlayer(mount, player, ctx = {}) {
   }
 
   if (player.type === "iframe" || (player.type === "html" && /^\s*https?:\/\//i.test(player.url) && !player.code)) {
-    const src = safeUrl(player.url);
+    const src = safeUrl(modernizeKodikUrl(player.url));
     if (!src) {
       mount.innerHTML = playerPlaceholder("Некорректная ссылка", "Разрешены только http(s) и относительные адреса.");
       return;
@@ -174,7 +175,7 @@ export function mountPlayer(mount, player, ctx = {}) {
   }
 
   if (player.type === "html") {
-    const html = player.code || (player.url ? `<iframe src="${attr(player.url)}" allowfullscreen allow="autoplay; fullscreen"></iframe>` : "");
+    const html = modernizeKodikUrl(player.code || (player.url ? `<iframe src="${attr(player.url)}" allowfullscreen allow="autoplay; fullscreen"></iframe>` : ""));
     if (!html.trim()) {
       mount.innerHTML = playerPlaceholder("Пустой код вставки", note);
       return;

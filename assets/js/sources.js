@@ -1023,7 +1023,7 @@ export async function translateTitles(titles, { limit = 60 } = {}) {
    Kodik — плееры озвучек, в том числе «Рабочей партии»
    Требуется токен партнёра kodikapi.com (вводится в настройках админки).
    ====================================================================== */
-const KODIK_API = "https://kodikapi.com";
+const KODIK_API = "https://kodik-api.com";
 
 function proxied(url, proxy) {
   return proxy ? `${proxy}${encodeURIComponent(url)}` : url;
@@ -1051,17 +1051,22 @@ function pickError(errors) {
  * Гонка «напрямую + прокси»: все варианты стартуют одновременно,
  * возвращается первый успешный ответ. Так ожидание не суммируется.
  */
-async function raceRequest(url, { proxy = "", timeout = 15000 } = {}) {
+async function raceRequest(url, { proxy = "", timeout = 15000, hedge = 2500 } = {}) {
   const candidates = proxy ? [proxy] : PUBLIC_PROXIES;
   const targets = [
     { label: "напрямую", url },
     ...candidates.map((item, index) => ({ label: proxy ? "через свой прокси" : `через прокси №${index + 1}`, url: proxied(url, item) })),
   ];
   return new Promise((resolve, reject) => {
-    let pending = targets.length;
-    let finished = false;
     const errors = [];
-    targets.forEach((target) => {
+    let finished = false;
+    let started = 0;
+    let pending = 0;
+    let proxiesStarted = false;
+
+    const fire = (target) => {
+      started += 1;
+      pending += 1;
       request(target.url, { timeout, cache: false })
         .then((data) => {
           if (finished) return;
@@ -1071,12 +1076,23 @@ async function raceRequest(url, { proxy = "", timeout = 15000 } = {}) {
         .catch((error) => {
           pending -= 1;
           errors.push(`${target.label}: ${error?.message || "ошибка"}`);
-          if (pending === 0 && !finished) {
+          /* прямой путь закрыт — прокси пробуем сразу, не дожидаясь hedge */
+          if (target === targets[0] && !proxiesStarted) startProxies();
+          if (pending === 0 && started === targets.length && !finished) {
             finished = true;
             reject(new Error(pickError(errors)));
           }
         });
-    });
+    };
+
+    const startProxies = () => {
+      if (proxiesStarted || finished) return;
+      proxiesStarted = true;
+      targets.slice(1).forEach(fire);
+    };
+
+    fire(targets[0]);
+    setTimeout(() => { if (!finished) startProxies(); }, hedge);
   });
 }
 
@@ -1103,11 +1119,22 @@ async function kodikRequest(path, params, { proxy = "", timeout = 15000 } = {}) 
   return raceRequest(direct, { proxy, timeout });
 }
 
+/* В марте 2026 Kodik сменил домены: kodikapi.com/kodik.info больше не работают.
+   API — kodik-api.com, плеер — kodikplayer.com. Старые ссылки переписываем на лету. */
+const KODIK_PLAYER = "https://kodikplayer.com";
+const KODIK_OLD_HOSTS = /^(?:https?:)?\/\/(?:www\.)?(?:kodik\.info|kodik\.biz|kodik\.cc|kodik\.ws|kodik\.me)\//i;
+
+export function modernizeKodikUrl(raw) {
+  const value = String(raw || "").trim();
+  if (!value) return "";
+  return value.replace(KODIK_OLD_HOSTS, `${KODIK_PLAYER}/`);
+}
+
 function kodikLink(link) {
-  const raw = String(link || "").trim();
+  const raw = modernizeKodikUrl(link);
   if (!raw) return "";
   if (raw.startsWith("//")) return `https:${raw}`;
-  if (raw.startsWith("/")) return `https://kodik.info${raw}`;
+  if (raw.startsWith("/")) return `${KODIK_PLAYER}${raw}`;
   return raw;
 }
 

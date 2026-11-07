@@ -98,11 +98,11 @@ globalThis.fetch = async (url, opts = {}) => {
     body = { data: [{ id: "7442", attributes: { canonicalTitle: "Shuiro no Kamen", titles: {} } }] }; status = 200;
   } else if (/kitsu\.io\/api\/edge\/anime\/7442\/episodes/.test(u)) {
     body = { data: [{ attributes: { number: 1, canonicalTitle: "Kitsu episode one" } }] }; status = 200;
-  } else if (/kodikapi\.com\/translations/.test(u)) {
+  } else if (/kodik-?api\.com\/translations/.test(u)) {
     body = { results: [{ id: 610, title: "AniLibria.TV", type: "voice" }, { id: 777, title: "Рабочая партия", type: "voice" }] };
     status = 200;
-  } else if (/kodikapi\.com\/search/.test(u)) { body = { results: [KODIK_ITEM] }; status = 200; }
-  else if (/kodikapi\.com\/list/.test(u)) { body = { results: [KODIK_ITEM], next_page: "" }; status = 200; }
+  } else if (/kodik-?api\.com\/search/.test(u)) { body = { results: [KODIK_ITEM] }; status = 200; }
+  else if (/kodik-?api\.com\/list/.test(u)) { body = { results: [KODIK_ITEM], next_page: "" }; status = 200; }
   else if (/translate\.googleapis\.com/.test(u)) {
     const q = decodeURIComponent((u.match(/[?&]q=([^&]*)/) || [, ""])[1]);
     body = [[[`Перевод: ${q}`, q, null, null, 1]]]; status = 200;
@@ -119,7 +119,7 @@ globalThis.fetch = async (url, opts = {}) => {
   if (u.includes("api.jikan.moe/v4/anime?q=") || u.includes("api.jikan.moe/v4/anime?q")) {
     body = { data: [{ mal_id: 61999, title: "Shuiro no Kamen", year: 2026 }] }; status = 200;
   }
-  if (u.includes("kodikapi.com/list")) {
+  if (u.includes("kodik-api.com/list")) {
     body = { results: [{ ...KODIK_ITEM, shikimori_id: "61999" }], next_page: "" }; status = 200;
   }
   return { ok: status === 200, status, json: async () => body };
@@ -179,7 +179,7 @@ check("Kodik: озвучки", translations.some((x) => x.title === "Рабоч�
 const found = await sources.kodikSearch({ token: "t", shikimoriId: "61999" });
 check("Kodik: поиск по Shikimori ID", found.length === 1 && found[0].shikimoriId === "61999", String(found.length));
 check("Kodik: серии разобраны", found[0].episodes.length === 2 && found[0].episodes[1].number === 2, JSON.stringify(found[0].episodes));
-check("Kodik: ссылки https", found[0].episodes[0].link.startsWith("https://kodik.info/seria/"), found[0].episodes[0].link);
+check("Kodik: ссылки https", /kodikplayer\.com\/seria\//.test(found[0].episodes[0].link), found[0].episodes[0].link);
 check("Kodik: озвучка", found[0].translation.title === "Рабочая партия", found[0].translation.title);
 const list = await sources.kodikList({ token: "t", translationId: 777 });
 check("Kodik: список тайтлов", list.length === 1 && list[0].episodes.length === 2, String(list.length));
@@ -211,7 +211,7 @@ check("CVH: ссылка плеера", sources.cvhPlayerUrl("111") === "cvh:111
 check("Транслит в slug", sources.translitSlug("Маска вермильона") === "maska-vermilonа" || sources.translitSlug("Маска вермильона").startsWith("maska-vermi"), sources.translitSlug("Маска вермильона"));
 const catalogEntries = sources.kodikCatalogEntries([KODIK_ITEM], { translation: "Рабочая партия" });
 check("Kodik→карточка: серии с плеерами", catalogEntries.length === 1 && catalogEntries[0].episodes.length === 2, JSON.stringify(catalogEntries[0]?.episodes?.length));
-check("Kodik→карточка: плеер это ссылка Kodik", /kodik\.info/.test(catalogEntries[0].episodes[0].players[0].url), catalogEntries[0]?.episodes?.[0]?.players?.[0]?.url);
+check("Kodik→карточка: плеер это ссылка Kodik", /kodikplayer\.com/.test(catalogEntries[0].episodes[0].players[0].url), catalogEntries[0]?.episodes?.[0]?.players?.[0]?.url);
 check("Kodik→карточка: постер по Shikimori ID", /shikimori/.test(catalogEntries[0].poster), catalogEntries[0].poster);
 check("Kodik→карточка: чужая озвучка отфильтрована", sources.kodikCatalogEntries([KODIK_ITEM], { translation: "AniLibria" }).length === 0);
 
@@ -230,11 +230,16 @@ const exported = JSON.parse(store.exportJSON({ settings: { kodikToken: "secret",
 check("Токены не публикуются", !exported.settings.kodikToken && !exported.settings.kinopoiskToken, JSON.stringify(exported.settings));
 check("Остальные настройки сохраняются", exported.settings.title === "x", JSON.stringify(exported.settings));
 
+/* Смена доменов Kodik в 2026: старые ссылки чинятся на лету */
+check("Kodik: старый домен → kodikplayer", sources.modernizeKodikUrl("https://kodik.info/seria/1/a/720p") === "https://kodikplayer.com/seria/1/a/720p");
+check("Kodik: протокол-относительная ссылка", sources.modernizeKodikUrl("//kodik.biz/serial/2/b/720p") === "https://kodikplayer.com/serial/2/b/720p");
+check("Kodik: чужие ссылки не трогаем", sources.modernizeKodikUrl("https://vk.com/video-1") === "https://vk.com/video-1");
+
 /* Kodik блокируется напрямую — должен ответить прокси, без ожидания очереди */
 const beforeRepair = globalThis.fetch;
 globalThis.fetch = async (url, opts = {}) => {
   const u = String(url);
-  if (u.startsWith("https://kodikapi.com")) throw new TypeError("Failed to fetch");
+  if (u.startsWith("https://kodik-api.com")) throw new TypeError("Failed to fetch");
   if (u.includes("allorigins")) {
     await new Promise((r) => setTimeout(r, 40));
     return { ok: true, status: 200, json: async () => ({ results: [{ id: 7, title: "Рабочая партия", type: "voice" }] }) };

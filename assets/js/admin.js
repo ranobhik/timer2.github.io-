@@ -251,8 +251,8 @@ function bindContentTab() {
     for (let i = 0; i < targets.length; i += 1) {
       btn.textContent = `Постеры ${i + 1}/${targets.length}…`;
       try {
-        const data = await fetchPosterSmart(targets[i]);
-        if (data?.poster) {
+        const data = await resolvePoster(targets[i]);
+        if (data.poster) {
           targets[i].poster = data.poster;
           if (!targets[i].shikimoriId && data.shikimoriId) targets[i].shikimoriId = data.shikimoriId;
           setCachedPoster(posterCacheKey(targets[i]), data.poster);
@@ -279,8 +279,8 @@ function bindContentTab() {
       if (!anime) return;
       btn.disabled = true;
       try {
-        const data = await fetchPosterSmart(anime);
-        if (!data?.poster) throw new Error("Постер не найден на Shikimori");
+        const data = await resolvePoster(anime);
+        if (!data.poster) throw new Error("Постер не найден ни на Shikimori, ни на AniList, ни на MyAnimeList");
         anime.poster = data.poster;
         if (!anime.shikimoriId && data.shikimoriId) anime.shikimoriId = data.shikimoriId;
         setCachedPoster(posterCacheKey(anime), data.poster);
@@ -801,13 +801,16 @@ function updatePosterPreview(url) {
   if (!box) return;
   const src = safeUrl(url);
   box.classList.toggle("hide", !src);
-  box.innerHTML = src ? `<img src="${attr(src)}" alt="" onerror="this.remove()" />` : "";
+  box.innerHTML = src
+    ? `<img src="${attr(src)}" alt="" referrerpolicy="no-referrer" loading="lazy" onerror="this.closest('#posterPreview')?.classList.add('is-broken');this.remove()" />`
+    : "";
+  box.classList.toggle("is-broken", false);
 }
 
 function setField(name, value) {
   if (value === undefined || value === null || value === "") return;
-  const input = $(`[name="${name}"]`);
-  if (input) input.value = String(value);
+  const input = $(`#animeForm [name="${name}"]`) || $(`[name="${name}"]`);
+  if (input && "value" in input) input.value = String(value);
 }
 
 function applyImportedFields(data) {
@@ -821,9 +824,10 @@ function applyImportedFields(data) {
   setField("rating", data.rating ? Number(data.rating).toFixed(1) : "");
   setField("ageRating", data.ageRating);
   setField("studio", data.studio);
-  const statusInput = $("[name='status']");
+  const statusInput = $("#animeForm [name='status']");
   if (statusInput && data.status && STATUS_LABELS[data.status]) statusInput.value = data.status;
-  const descInput = $("[name='description']");
+  // Внимание: в документе есть <meta name="description">, поэтому ищем строго внутри формы.
+  const descInput = $("#animeForm [name='description']");
   if (descInput && data.description) descInput.value = data.description;
 
   (data.genres || []).filter(Boolean).forEach((genre) => {
@@ -843,18 +847,23 @@ function applyImportedFields(data) {
     wrap.append(label);
   });
 
-  updatePosterPreview(data.poster);
+  updatePosterPreview(data.poster || $("[name='poster']")?.value || "");
+  const episodeCount = applyImportedEpisodes(data);
   const statusEl = document.getElementById("editorStatus");
-  if (statusEl) statusEl.textContent = "Данные импортированы — не забудьте сохранить";
+  if (statusEl) {
+    const bits = ["Данные импортированы — не забудьте сохранить"];
+    if (episodeCount) bits.push(`серий: ${episodeCount}`);
+    statusEl.textContent = bits.join(" · ");
+  }
   const form = $("#animeForm");
   if (form) captureEditorValues();
 }
 
 function importedEpisodes(data) {
-  const count = Math.min(120, Number(data.episodesCount) || 0);
+  const count = Math.min(200, Number(data.episodesCount) || 0);
   const duration = data.duration ? `${data.duration} мин` : "24 мин";
   if (Array.isArray(data.episodeList) && data.episodeList.length) {
-    return data.episodeList.map((ep, i) => ({
+    return data.episodeList.slice(0, 120).map((ep, i) => ({
       id: uid("ep"),
       number: Number(ep.number) || i + 1,
       title: ep.title || "",
@@ -864,7 +873,7 @@ function importedEpisodes(data) {
     }));
   }
   if (count > 0) {
-    return Array.from({ length: Math.min(24, count) }, (_, i) => ({
+    return Array.from({ length: Math.min(60, count) }, (_, i) => ({
       id: uid("ep"),
       number: i + 1,
       title: "",
@@ -874,6 +883,60 @@ function importedEpisodes(data) {
     }));
   }
   return [];
+}
+
+/** Перерисовывает блок «Эпизоды и плееры» из editorModel. */
+function renderEpisodesEditor() {
+  const wrap = $("#episodeEditor");
+  if (!wrap || !editorModel) return;
+  wrap.innerHTML = editorModel.episodes.map((ep, i) => episodeEditorHTML(ep, i)).join("")
+    || '<p class="muted small">Эпизодов нет. Нажмите «Эпизод».</p>';
+  bindEpisodeControls();
+}
+
+/**
+ * Подставляет серии из импорта: названия и количество с MyAnimeList.
+ * Если у пользователя уже настроены плееры — дополняем, а не затираем.
+ */
+function applyImportedEpisodes(data) {
+  if (!editorModel) return 0;
+  const fresh = importedEpisodes(data);
+  if (!fresh.length) return 0;
+  const existing = Array.isArray(editorModel.episodes) ? editorModel.episodes : [];
+  const hasPlayers = existing.some((ep) => (ep.players || []).some(
+    (player) => player?.url || player?.code || (player?.type && player.type !== "demo"),
+  ));
+  if (!hasPlayers) {
+    editorModel.episodes = fresh;
+    renderEpisodesEditor();
+    return fresh.length;
+  }
+  existing.forEach((ep, index) => {
+    const imported = fresh[index];
+    if (!imported) return;
+    if (!ep.title && imported.title) ep.title = imported.title;
+    if (!ep.date && imported.date) ep.date = imported.date;
+  });
+  for (let i = existing.length; i < fresh.length; i += 1) existing.push(fresh[i]);
+  editorModel.episodes = existing;
+  renderEpisodesEditor();
+  return existing.length;
+}
+
+/** Что реально подтянулось — показываем в тосте. */
+function importSummary(data) {
+  const parts = [];
+  if (data.description) parts.push("описание");
+  if (data.genres?.length) parts.push(`жанры (${data.genres.length})`);
+  if (data.poster) parts.push("постер");
+  if (data.banner) parts.push("баннер");
+  const episodes = Array.isArray(data.episodeList) && data.episodeList.length
+    ? data.episodeList.length
+    : Number(data.episodesCount) || 0;
+  if (episodes) parts.push(`эпизоды (${episodes})`);
+  const sources = (data.report?.sources || []).filter(Boolean);
+  const tail = sources.length ? ` · ${[...new Set(sources)].join(" + ")}` : "";
+  return parts.length ? `Подтянуто: ${parts.join(", ")}${tail}` : "Данные импортированы";
 }
 
 function createAnimeFromImport(data) {
@@ -909,6 +972,32 @@ function createAnimeFromImport(data) {
   draftCatalog.anime.unshift(anime);
   store.saveDraft(draftCatalog);
   return anime;
+}
+
+/**
+ * Постер для уже существующей карточки: сначала Shikimori, затем AniList / MyAnimeList,
+ * и только в крайнем случае — прямой URL по Shikimori ID.
+ */
+async function resolvePoster(anime) {
+  let data = null;
+  try {
+    data = await fetchPosterSmart(anime);
+  } catch (error) {
+    console.debug("poster:", error?.message);
+  }
+  let poster = data?.poster && !data.fallback ? data.poster : "";
+  let shikimoriId = data?.shikimoriId || anime.shikimoriId || "";
+  if (!poster) {
+    try {
+      const full = await sources.enrich({ ...anime, poster: "" }, { withEpisodes: false });
+      if (full?.poster) poster = full.poster;
+      if (!shikimoriId && full?.shikimoriId) shikimoriId = full.shikimoriId;
+    } catch (error) {
+      console.debug("poster sources:", error?.message);
+    }
+  }
+  if (!poster && shikimoriId) poster = posterUrlById(shikimoriId);
+  return { poster, shikimoriId };
 }
 
 async function importByValue(value, { withEpisodes = false, source } = {}) {
@@ -983,12 +1072,12 @@ async function handleQuickImport(btn, candidate = null) {
     const data = candidate
       ? await sources.importCandidate(candidate, {
         kinopoiskToken: draftCatalog.settings.kinopoiskToken || "",
-        withEpisodes: false,
+        withEpisodes: true,
       })
-      : await importByValue(value);
+      : await importByValue(value, { withEpisodes: true });
     applyImportedFields(data);
     if (input) input.value = "";
-    ui.toast("Карточка заполнена данными", "ok");
+    ui.toast(importSummary(data), "ok");
   } catch (error) {
     ui.toast(error?.message || "Не удалось импортировать", "err");
   } finally {
@@ -1240,7 +1329,8 @@ function importTab() {
       <div class="panel-head">
         <div>
           <h2>Импорт из внешних баз</h2>
-          <p>Введите название, ссылку или ID — данные подтянутся автоматически: название на русском, оригинал, описание, жанры, рейтинг, возраст, студия, постер и широкий баннер.</p>
+          <p>Введите название, ссылку или ID — данные подтянутся автоматически: название на русском, оригинал, описание, жанры, рейтинг, возраст, студия, постер, баннер, количество серий и названия серий.</p>
+          <p class="hint" style="margin-top:6px">Недостающее добирается из других баз: если на Shikimori нет постера или жанров — возьмём с AniList, названия серий — с MyAnimeList (Jikan). Источники можно комбинировать, данные склеиваются в одну карточку.</p>
         </div>
       </div>
       <form id="importForm" class="field-row" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
@@ -1260,7 +1350,7 @@ function importTab() {
           </select>
         </div>
         <label class="switch" style="margin-bottom:8px;white-space:nowrap">
-          <input type="checkbox" id="importEpisodes" /><span class="track"></span> Эпизоды
+          <input type="checkbox" id="importEpisodes" checked /><span class="track"></span> Эпизоды
         </label>
         <button class="btn" type="submit">${ui.icon("search")} Найти</button>
       </form>
@@ -1308,7 +1398,7 @@ function bindImportTab() {
         withEpisodes: Boolean($("#importEpisodes")?.checked),
       });
       const created = createAnimeFromImport(data);
-      ui.toast(`«${created.title}» добавлено в черновик`, "ok");
+      ui.toast(`«${created.title}» добавлено в черновик — ${importSummary(data).toLowerCase()}`, "ok");
       goAdmin(`#/admin/edit/${created.id}`);
     } catch (error) {
       ui.toast(error?.message || "Не удалось импортировать", "err");

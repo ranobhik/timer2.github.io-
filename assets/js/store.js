@@ -508,12 +508,15 @@ export function isAbandoned(anime, now = Date.now(), days = ABANDON_DAYS) {
   const stamp = Date.parse(String(raw).trim().replace(" ", "T"));
   const stale = Number.isFinite(stamp) ? now - stamp > days * 86400000 : false;
 
-  if (expected) return have < expected && stale;
+  if (expected && have >= expected) return false;
 
-  /* счётчиков нет: завершённый тайтл с одной серией и давно без обновлений — заброшен */
+  const finished = anime?.status === "released";
   const film = /фильм|movie|спешл|special|ona|ova/i.test(String(anime?.kind || ""));
-  if (!film && anime?.status === "released" && have <= 1 && Number.isFinite(stamp)) return stale;
-  return false;
+  /* завершённый сериал, где у нас всего одна серия, — заброшен без оглядки на даты */
+  if (finished && !film && have <= 1) return true;
+
+  if (!expected) return false;
+  return stale;
 }
 
 export function publicAnime() {

@@ -237,6 +237,7 @@ function shikimoriCandidate(item) {
     kind: KIND_LABELS[item.kind] || item.kind || "",
     poster: pickShikiImage(item.image),
     episodes: Number(item.episodes) || Number(item.episodes_aired) || 0,
+    episodesAired: Number(item.episodes_aired) || 0,
     status: SHIKI_STATUS[item.status] || "ongoing",
   };
 }

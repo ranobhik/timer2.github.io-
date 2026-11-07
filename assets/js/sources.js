@@ -922,4 +922,208 @@ export async function enrich(anime, { kinopoiskToken = "", withEpisodes = true, 
   return result;
 }
 
+/* ======================================================================
+   Перевод названий серий на русский (Google → MyMemory, с кешем)
+   ====================================================================== */
+const TRANSLATE_CACHE_KEY = "rp.translate.v1";
+
+function readTranslations() {
+  const store = storage();
+  if (!store) return {};
+  try {
+    const parsed = JSON.parse(store.getItem(TRANSLATE_CACHE_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function rememberTranslation(source, translated) {
+  const store = storage();
+  if (!store) return;
+  const map = readTranslations();
+  map[source] = translated;
+  const keys = Object.keys(map);
+  if (keys.length > 800) keys.slice(0, keys.length - 800).forEach((key) => delete map[key]);
+  try {
+    store.setItem(TRANSLATE_CACHE_KEY, JSON.stringify(map));
+  } catch {
+    /* нет места — не кешируем */
+  }
+}
+
+async function translateOne(text) {
+  const cached = readTranslations()[text];
+  if (cached) return cached;
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=ru&dt=t&q=${encodeURIComponent(text)}`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      const translated = Array.isArray(data?.[0]) ? data[0].map((part) => part?.[0] || "").join("").trim() : "";
+      if (translated) {
+        rememberTranslation(text, translated);
+        return translated;
+      }
+    }
+  } catch (error) {
+    console.debug("Перевод (Google):", error?.message);
+  }
+  try {
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|ru`;
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      const translated = String(data?.responseData?.translatedText || "").trim();
+      if (translated && !/MYMEMORY WARNING/i.test(translated)) {
+        rememberTranslation(text, translated);
+        return translated;
+      }
+    }
+  } catch (error) {
+    console.debug("Перевод (MyMemory):", error?.message);
+  }
+  return "";
+}
+
+/** Переводит набор названий на русский. Возвращает карту «оригинал → перевод». */
+export async function translateTitles(titles, { limit = 60 } = {}) {
+  const unique = [...new Set((titles || []).map((title) => String(title || "").trim()).filter(Boolean))]
+    .filter((title) => !/^[а-яё\s\d.,:!?—–-]+$/i.test(title))
+    .slice(0, limit);
+  const map = {};
+  for (const title of unique) {
+    const translated = await translateOne(title);
+    if (translated) map[title] = translated;
+  }
+  return map;
+}
+
+/* ======================================================================
+   Kodik — плееры озвучек, в том числе «Рабочей партии»
+   Требуется токен партнёра kodikapi.com (вводится в настройках админки).
+   ====================================================================== */
+const KODIK_API = "https://kodikapi.com";
+
+function proxied(url, proxy) {
+  return proxy ? `${proxy}${encodeURIComponent(url)}` : url;
+}
+
+async function kodikRequest(path, params, { proxy = "", timeout = 16000 } = {}) {
+  const direct = `${KODIK_API}${path}?${new URLSearchParams(params).toString()}`;
+  try {
+    return await request(direct, { timeout, cache: false });
+  } catch (error) {
+    if (!proxy) throw error;
+    console.debug("Kodik: пробую CORS-прокси", error?.message);
+    return request(proxied(direct, proxy), { timeout, cache: false });
+  }
+}
+
+function kodikLink(link) {
+  const raw = String(link || "").trim();
+  if (!raw) return "";
+  if (raw.startsWith("//")) return `https:${raw}`;
+  if (raw.startsWith("/")) return `https://kodik.info${raw}`;
+  return raw;
+}
+
+/** Разбирает сезоны/серии ответа Kodik в плоский список серий. */
+export function kodikEpisodes(item) {
+  const seasons = item?.seasons || {};
+  const list = [];
+  Object.keys(seasons).forEach((seasonKey) => {
+    const season = seasons[seasonKey] || {};
+    const episodes = season.episodes || {};
+    Object.keys(episodes).forEach((episodeKey) => {
+      const episode = episodes[episodeKey] || {};
+      const link = kodikLink(episode.link);
+      if (!link) return;
+      list.push({
+        season: Number(seasonKey) || 1,
+        number: Number(episodeKey) || list.length + 1,
+        link,
+        screenshots: episode.screenshots || [],
+      });
+    });
+  });
+  if (!list.length && item?.link) {
+    list.push({ season: 1, number: 1, link: kodikLink(item.link), screenshots: item.screenshots || [] });
+  }
+  return list.sort((a, b) => a.season - b.season || a.number - b.number);
+}
+
+function normalizeKodik(results) {
+  return (Array.isArray(results) ? results : []).map((item) => ({
+    id: item?.id || "",
+    type: item?.type || "",
+    link: kodikLink(item?.link),
+    title: String(item?.title || "").trim(),
+    originalTitle: String(item?.title_orig || "").trim(),
+    otherTitle: String(item?.other_title || "").trim(),
+    year: Number(item?.year) || undefined,
+    translation: {
+      id: item?.translation?.id || 0,
+      title: String(item?.translation?.title || "").trim(),
+      type: String(item?.translation?.type || "").trim(),
+    },
+    episodesCount: Number(item?.episodes_count) || Number(item?.last_episode) || 0,
+    shikimoriId: String(item?.shikimori_id || ""),
+    quality: String(item?.quality || ""),
+    screenshots: Array.isArray(item?.screenshots) ? item.screenshots : [],
+    episodes: kodikEpisodes(item),
+  })).filter((item) => item.episodes.length || item.link);
+}
+
+export async function kodikTranslations({ token, proxy = "" } = {}) {
+  if (!token) throw new Error("Укажите токен Kodik в «Настройках сайта»");
+  const data = await kodikRequest("/translations", { token, limit: "500" }, { proxy });
+  return (data?.results || [])
+    .map((item) => ({
+      id: Number(item?.id) || 0,
+      title: String(item?.title || "").trim(),
+      type: String(item?.type || "").trim(),
+    }))
+    .filter((item) => item.id && item.title);
+}
+
+/** Ищет плееры по Shikimori ID или названию. */
+export async function kodikSearch({ token, shikimoriId = "", title = "", translationId = "", proxy = "", limit = 100 } = {}) {
+  if (!token) throw new Error("Укажите токен Kodik в «Настройках сайта»");
+  const params = { token, limit: String(limit), with_episodes: "true" };
+  if (shikimoriId) params.shikimori_id = String(shikimoriId);
+  else if (title) params.title = title;
+  else throw new Error("Нужен Shikimori ID или название");
+  if (translationId) params.translation_id = String(translationId);
+  const data = await kodikRequest("/search", params, { proxy });
+  return normalizeKodik(data?.results);
+}
+
+/** Список всех тайтлов выбранной озвучки — для синхронизации каталога. */
+export async function kodikList({ token, translationId = "", proxy = "", types = "anime-serial,anime", maxPages = 5 } = {}) {
+  if (!token) throw new Error("Укажите токен Kodik в «Настройках сайта»");
+  const collected = [];
+  let url = `${KODIK_API}/list?${new URLSearchParams({
+    token,
+    limit: "100",
+    types,
+    with_episodes: "true",
+    ...(translationId ? { translation_id: String(translationId) } : {}),
+  }).toString()}`;
+
+  for (let page = 0; page < maxPages && url; page += 1) {
+    let data = null;
+    try {
+      data = await request(url, { timeout: 20000, cache: false });
+    } catch (error) {
+      if (!proxy) throw error;
+      data = await request(proxied(url, proxy), { timeout: 20000, cache: false });
+    }
+    collected.push(...normalizeKodik(data?.results));
+    const next = String(data?.next_page || "");
+    url = next ? (next.startsWith("http") ? next : `${KODIK_API}${next.startsWith("/") ? "" : "/"}${next}`) : "";
+  }
+  return collected;
+}
+
 export { stripHtml, KIND_LABELS };

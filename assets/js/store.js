@@ -65,6 +65,10 @@ export const DEFAULT_SETTINGS = {
   playerNote: "",
   customCss: "",
   kinopoiskToken: "",
+  kodikToken: "",
+  kodikTranslation: "Рабочая партия",
+  corsProxy: "",
+  translateEpisodes: true,
 };
 
 export const DEFAULT_GENRES = [

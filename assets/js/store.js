@@ -147,6 +147,7 @@ export function normalizeAnime(raw, index = 0) {
     director: String(item.director || ""),
     country: String(item.country || "Япония"),
     tags: Array.isArray(item.tags) ? item.tags.map(String).filter(Boolean) : [],
+    aliases: Array.isArray(item.aliases) ? item.aliases.map(String).filter(Boolean) : [],
     published: item.published !== false,
     featured: item.featured === true,
     createdAt: String(item.createdAt || new Date().toISOString()),

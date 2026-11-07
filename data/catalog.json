@@ -191,7 +191,14 @@
           ]
         }
       ],
-      "shikimoriId": "16498"
+      "shikimoriId": "16498",
+      "aliases": [
+        "Attack on Titan",
+        "Shingeki no Kyojin",
+        "進撃の巨人",
+        "Вторжение гигантов",
+        "Атакующий титан"
+      ]
     },
     {
       "id": "jujutsu-kaisen",
@@ -290,7 +297,12 @@
           ]
         }
       ],
-      "shikimoriId": "40748"
+      "shikimoriId": "40748",
+      "aliases": [
+        "Jujutsu Kaisen",
+        "呪術廻戦",
+        "Магическая битва"
+      ]
     },
     {
       "id": "demon-slayer",
@@ -389,7 +401,13 @@
           ]
         }
       ],
-      "shikimoriId": "38000"
+      "shikimoriId": "38000",
+      "aliases": [
+        "Demon Slayer",
+        "Kimetsu no Yaiba",
+        "鬼滅の刃",
+        "Клинок, рассекающий демонов"
+      ]
     },
     {
       "id": "chainsaw-man",
@@ -451,7 +469,12 @@
           ]
         }
       ],
-      "shikimoriId": "44511"
+      "shikimoriId": "44511",
+      "aliases": [
+        "Chainsaw Man",
+        "チェンソーマン",
+        "Человек-бензопила"
+      ]
     },
     {
       "id": "death-note",
@@ -550,7 +573,12 @@
           ]
         }
       ],
-      "shikimoriId": "1535"
+      "shikimoriId": "1535",
+      "aliases": [
+        "Death Note",
+        "デスノート",
+        "Тетрадь смерти"
+      ]
     },
     {
       "id": "fullmetal-alchemist",
@@ -649,7 +677,13 @@
           ]
         }
       ],
-      "shikimoriId": "5114"
+      "shikimoriId": "5114",
+      "aliases": [
+        "Fullmetal Alchemist: Brotherhood",
+        "Hagane no Renkinjutsushi",
+        "鋼の錬金術師",
+        "Стальной алхимик"
+      ]
     },
     {
       "id": "spy-family",
@@ -771,7 +805,13 @@
           ]
         }
       ],
-      "shikimoriId": "50265"
+      "shikimoriId": "50265",
+      "aliases": [
+        "SPY×FAMILY",
+        "Spy x Family",
+        "スパイファミリー",
+        "Семья шпиона"
+      ]
     },
     {
       "id": "violet-evergarden",
@@ -870,7 +910,12 @@
           ]
         }
       ],
-      "shikimoriId": "33352"
+      "shikimoriId": "33352",
+      "aliases": [
+        "Violet Evergarden",
+        "ヴァイオレット・エヴァーガーデン",
+        "Вайолет Эвергарден"
+      ]
     },
     {
       "id": "one-piece",
@@ -948,7 +993,12 @@
           ]
         }
       ],
-      "shikimoriId": "21"
+      "shikimoriId": "21",
+      "aliases": [
+        "One Piece",
+        "ワンピース",
+        "Ван-Пис"
+      ]
     },
     {
       "id": "hunter-x-hunter",
@@ -1047,7 +1097,13 @@
           ]
         }
       ],
-      "shikimoriId": "11061"
+      "shikimoriId": "11061",
+      "aliases": [
+        "Hunter x Hunter",
+        "HUNTER×HUNTER",
+        "ハンター×ハンター",
+        "Охотник х Охотник"
+      ]
     }
   ]
 }

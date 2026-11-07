@@ -4,7 +4,7 @@ import * as store from "./store.js";
 import * as ui from "./ui.js";
 import { applyCachedPosters } from "./shikimori.js";
 import {
-  $, $$, attr, debounce, esc, formatDate, hueFrom, pluralEpisodes, safeUrl, statusLabel,
+  $, $$, attr, debounce, esc, formatDate, hueFrom, matchesSearch, pluralEpisodes, safeUrl, statusLabel,
 } from "./utils.js";
 
 const view = document.getElementById("view");
@@ -160,6 +160,93 @@ function setTitle(title) {
 }
 
 /* ---------- Глобальные обработчики ---------- */
+/* Подсказки под поиском в шапке: миниатюры и названия совпадений */
+function initSearchSuggest() {
+  if (!searchForm || !searchInput) return;
+  searchForm.classList.add("has-suggest");
+  let box = document.getElementById("searchSuggest");
+  if (!box) {
+    box = document.createElement("div");
+    box.className = "search-suggest";
+    box.id = "searchSuggest";
+    box.hidden = true;
+    searchForm.append(box);
+  }
+
+  let items = [];
+  let active = -1;
+
+  const close = () => {
+    box.hidden = true;
+    box.innerHTML = "";
+    items = [];
+    active = -1;
+  };
+
+  const render = () => {
+    const query = searchInput.value.trim();
+    if (query.length < 2) { close(); return; }
+    items = store.publicAnime()
+      .filter((anime) => matchesSearch(
+        [anime.title, anime.originalTitle, ...(anime.aliases || []), ...anime.genres],
+        query,
+      ))
+      .sort((a, b) => b.rating - a.rating)
+      .slice(0, 6);
+    if (!items.length) { close(); return; }
+    active = 0;
+    box.innerHTML = items.map((anime, index) => {
+      const poster = safeUrl(anime.poster);
+      const meta = [anime.year, anime.genres[0], anime.rating ? `★ ${anime.rating.toFixed(1)}` : ""]
+        .filter(Boolean).join(" · ");
+      return `<a class="search-suggest-item${index === 0 ? " is-active" : ""}" href="#/anime/${attr(anime.id)}" data-suggest="${index}">
+        <span class="search-suggest-poster" style="--h:${hueFrom(anime.title)}">${poster ? `<img src="${attr(poster)}" alt="" referrerpolicy="no-referrer" loading="lazy" onerror="this.remove()" />` : ""}</span>
+        <span class="search-suggest-text"><b>${esc(anime.title)}</b><small>${esc(meta)}</small></span>
+      </a>`;
+    }).join("");
+    box.hidden = false;
+  };
+
+  const highlight = () => {
+    box.querySelectorAll(".search-suggest-item").forEach((el, index) => {
+      el.classList.toggle("is-active", index === active);
+    });
+  };
+
+  searchInput.addEventListener("input", debounce(render, 120));
+  searchInput.addEventListener("focus", () => {
+    if (searchInput.value.trim().length >= 2) render();
+  });
+  searchInput.addEventListener("keydown", (event) => {
+    if (box.hidden) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      active = Math.min(items.length - 1, active + 1);
+      highlight();
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      active = Math.max(0, active - 1);
+      highlight();
+    } else if (event.key === "Enter" && items[active]) {
+      event.preventDefault();
+      const picked = items[active];
+      close();
+      searchInput.value = "";
+      location.hash = `#/anime/${picked.id}`;
+    } else if (event.key === "Escape") {
+      close();
+    }
+  });
+  box.addEventListener("click", () => {
+    searchInput.value = "";
+    close();
+  });
+  searchInput.addEventListener("blur", () => setTimeout(close, 160));
+  document.addEventListener("click", (event) => {
+    if (!searchForm.contains(event.target)) close();
+  });
+}
+
 function bindGlobalUI() {
   themeToggle?.addEventListener("click", () => {
     const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
@@ -192,9 +279,14 @@ function bindGlobalUI() {
   });
 
   const liveSearch = debounce((value) => {
-    if (typeof searchHandler === "function") searchHandler(value);
+    // если пользователь уже перешёл на другую страницу — не перетираем её фильтр старым вводом
+    if (typeof searchHandler !== "function") return;
+    if (searchInput.value.trim() !== value) return;
+    searchHandler(value);
   }, 180);
   searchInput?.addEventListener("input", () => liveSearch(searchInput.value.trim()));
+
+  initSearchSuggest();
 
   // Избранное (делегирование)
   document.addEventListener("click", (event) => {
@@ -552,12 +644,15 @@ function initRails() {
     let startLeft = 0;
     let moved = false;
 
+    scroller.addEventListener("dragstart", (event) => event.preventDefault());
+
     scroller.addEventListener("pointerdown", (event) => {
-      if (event.pointerType === "touch" || event.button !== 0) return;
+      if (event.pointerType === "touch" || (event.button !== undefined && event.button !== 0)) return;
       down = true;
       moved = false;
       startX = event.clientX;
       startLeft = scroller.scrollLeft;
+      try { scroller.setPointerCapture?.(event.pointerId); } catch { /* не критично */ }
     });
 
     scroller.addEventListener("pointermove", (event) => {
@@ -585,6 +680,14 @@ function initRails() {
     }, true);
 
     scroller.addEventListener("scroll", update, { passive: true });
+    scroller.querySelectorAll("img").forEach((img) => {
+      if (img.complete) return;
+      img.addEventListener("load", update, { once: true });
+      img.addEventListener("error", update, { once: true });
+    });
+    if (typeof ResizeObserver === "function") {
+      new ResizeObserver(update).observe(scroller);
+    }
     window.addEventListener("resize", debounce(update, 150));
     update();
   });
@@ -757,14 +860,12 @@ function catalogView(query) {
 
   function applyFilters() {
     let list = [...published];
-    const q = state.q.trim().toLowerCase();
+    const q = state.q.trim();
     if (q) {
-      list = list.filter((a) =>
-        a.title.toLowerCase().includes(q) ||
-        a.originalTitle.toLowerCase().includes(q) ||
-        a.genres.some((g) => g.toLowerCase().includes(q)) ||
-        a.tags.some((t) => t.toLowerCase().includes(q)),
-      );
+      list = list.filter((a) => matchesSearch(
+        [a.title, a.originalTitle, a.studio, ...(a.aliases || []), ...a.genres, ...a.tags],
+        q,
+      ));
     }
     if (state.genre !== "all") list = list.filter((a) => a.genres.includes(state.genre));
     if (state.year !== "all") list = list.filter((a) => String(a.year) === state.year);

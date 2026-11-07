@@ -84,6 +84,11 @@ window.fetch = async (url, opts = {}) => {
       translation: { id: 777, title: "Рабочая партия", type: "voice" },
       episodes_count: 2, shikimori_id: "61999",
       seasons: { 1: { episodes: { 1: { link: "//kodik.info/seria/1/a/720p" }, 2: { link: "//kodik.info/seria/2/b/720p" } } } },
+    }, {
+      id: "serial-888", type: "anime-serial", title: "Второй тайтл партии", title_orig: "Second Party Title", year: 2025,
+      translation: { id: 777, title: "Рабочая партия", type: "voice" },
+      episodes_count: 3,
+      seasons: { 1: { episodes: { 1: { link: "//kodik.info/seria/3/c/720p" }, 2: { link: "//kodik.info/seria/4/d/720p" }, 3: { link: "//kodik.info/seria/5/e/720p" } } } },
     }], next_page: "" }; status = 200;
   }
   else if (u.includes("kodik-api.com/search")) {
@@ -172,7 +177,7 @@ check("Статус синхронизации", Boolean(window.document.querySe
 await wait(1200);
 const storeMod = await import(`${ROOT}/assets/js/store.js`);
 const autoAnime = storeMod.getCatalog().anime.filter((a) => a.id.startsWith("kodik-"));
-check("Авто-каталог: карточка из Kodik", autoAnime.length === 1, String(autoAnime.length));
+check("Авто-каталог: карточки из Kodik", autoAnime.length === 2, String(autoAnime.length));
 check("В каталоге только тайтлы озвучки", storeMod.getCatalog().anime.every((a) => a.id.startsWith("kodik-")), String(storeMod.getCatalog().anime.length));
 const firstPlayers = autoAnime[0]?.episodes?.[0]?.players || [];
 const kodikPlayer = firstPlayers.find((p) => p.type === "iframe");
@@ -250,5 +255,29 @@ const store = await import(`${ROOT}/assets/js/store.js`);
 check("Ключ Kodik сохранён в браузере", store.getKeys().kodikToken === "test-kodik-key", JSON.stringify(store.getKeys()));
 check("Секретный ключ не попал в каталог", !Object.prototype.hasOwnProperty.call(store.getCatalog().settings, "kinopoiskToken") || !store.getCatalog().settings.kodikToken, JSON.stringify(store.getCatalog().settings?.kodikToken));
 
+/* Карусель: слайд не сбрасывается при перерисовке и возврате на главную */
+window.location.hash = "#/";
+await wait(500);
+const heroSlides = document.querySelectorAll(".hero-slide");
+if (heroSlides.length > 1) {
+  document.querySelector("[data-hero-next]")?.click();
+  await wait(120);
+  const picked = document.querySelector('.hero-slide[aria-hidden="false"]')?.dataset.heroAnime || "";
+  window.location.hash = "#/catalog";
+  await wait(300);
+  window.location.hash = "#/";
+  await wait(500);
+  const after = document.querySelector('.hero-slide[aria-hidden="false"]')?.dataset.heroAnime || "";
+  check("Карусель: выбранный слайд не сбрасывается", Boolean(picked) && picked === after, `${picked} → ${after}`);
+}
+check(
+  "Завершённый тайтл с одной серией скрыт даже при свежих датах",
+  storeMod.isAbandoned(
+    { status: "released", kind: "ТВ-сериал", episodes: [{}], episodesAired: 12, sourceUpdatedAt: new Date().toISOString() },
+  ) === true,
+);
+
 console.log(`\n${pass}/${pass + fail} проверок пройдено`);
-if (fail) process.exit(1);
+/* закрываем окно, иначе таймеры карусели держат процесс */
+try { dom.window.close(); } catch { /* ignore */ }
+process.exit(fail ? 1 : 0);

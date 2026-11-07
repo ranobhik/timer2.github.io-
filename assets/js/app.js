@@ -23,6 +23,7 @@ let searchHandler = null;
 let lastRenderedPath = "";
 let heroTimer = null;
 let heroIndex = 0; // текущий слайд — переживает перерисовку
+let heroAnimeId = ""; // id тайтла на текущем слайде
 let heroController = null;
 
 /* =======================================================================
@@ -804,7 +805,7 @@ function heroSlideHTML({ anime, label }, index) {
     ? `<img class="hero-media-img" src="${attr(mediaUrl)}" alt="" referrerpolicy="no-referrer"
         loading="${index === heroIndex ? "eager" : "lazy"}" decoding="async" draggable="false" onerror="this.remove()" />`
     : "";
-  return `<article class="hero-slide" data-slide="${index}" aria-hidden="${index !== heroIndex}">
+  return `<article class="hero-slide" data-slide="${index}" data-hero-anime="${attr(anime.id)}" aria-hidden="${index !== heroIndex}">
     <div class="hero-media ${mediaClass}" style="--h:${hueFrom(anime.title)}">${media}</div>
     <div class="hero-scrim"></div>
     <div class="hero-content">
@@ -855,7 +856,9 @@ function initHeroCarousel() {
   const dots = $$("[data-hero-dot]", root);
   if (!track || slides.length < 2) return;
 
-  let index = Math.max(0, Math.min(slides.length - 1, Number(heroIndex) || 0));
+  /* восстанавливаем тот же тайтл, даже если порядок слайдов изменился */
+  const restored = heroAnimeId ? slides.findIndex((slide) => slide.dataset.heroAnime === heroAnimeId) : -1;
+  let index = restored >= 0 ? restored : Math.max(0, Math.min(slides.length - 1, Number(heroIndex) || 0));
   let dragging = false;
   let moved = false;
   let startX = 0;
@@ -870,6 +873,7 @@ function initHeroCarousel() {
   const go = (next) => {
     index = (next + slides.length) % slides.length;
     heroIndex = index;
+    heroAnimeId = slides[index]?.dataset.heroAnime || heroAnimeId;
     track.style.transition = "";
     render();
     slides.forEach((slide, i) => {
@@ -879,8 +883,6 @@ function initHeroCarousel() {
     });
     dots.forEach((dot, i) => dot.setAttribute("aria-current", String(i === index)));
   };
-
-  go(index); // восстановить слайд после перерисовки страницы
 
   const reduceMotion = Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
   const stop = () => clearHeroTimer();
@@ -961,7 +963,7 @@ function initHeroCarousel() {
     if (event.key === "ArrowRight") { go(index + 1); restart(); }
   });
 
-  go(0);
+  go(index); // восстановить слайд после перерисовки страницы
   start();
   heroController = { start, stop };
 }

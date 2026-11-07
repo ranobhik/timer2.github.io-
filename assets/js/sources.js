@@ -5,7 +5,9 @@
 import { posterUrlById } from "./shikimori.js";
 
 const SHIKI = "https://shikimori.one";
-const SHIKI_API = `${SHIKI}/api`;
+/* shikimori.one → 301 на shikimori.io, а у редиректа нет CORS-заголовков,
+   поэтому в браузере запрос падал с NetworkError. Основной хост — .io. */
+const SHIKI_API_HOSTS = ["https://shikimori.io/api", "https://shikimori.one/api"];
 const ANILIST_API = "https://graphql.anilist.co";
 const JIKAN_API = "https://api.jikan.moe/v4";
 const KINOPOISK_API = "https://api.kinopoisk.dev/v1.4";
@@ -58,6 +60,9 @@ async function request(url, { method = "GET", headers = {}, body, timeout = 1200
     return await res.json();
   } catch (error) {
     if (error?.name === "AbortError") throw new Error("Сервер не ответил вовремя");
+    if (error instanceof TypeError) {
+      throw new Error("Не удалось связаться с источником: проверьте VPN или блокировщик рекламы");
+    }
     throw error;
   } finally {
     clearTimeout(timer);
@@ -162,13 +167,26 @@ function ageFromShikimori(rating) {
   return map[String(rating || "").toLowerCase()] || "";
 }
 
+async function shikiRequest(path) {
+  let lastError = null;
+  for (const host of SHIKI_API_HOSTS) {
+    try {
+      return await request(`${host}${path}`);
+    } catch (error) {
+      lastError = error;
+      if (/HTTP 4\d\d/.test(error?.message || "")) break;
+    }
+  }
+  throw lastError;
+}
+
 export async function searchShikimori(query, limit = 8) {
-  const list = await request(`${SHIKI_API}/animes?search=${encodeURIComponent(query)}&limit=${limit}&order=popularity`);
+  const list = await shikiRequest(`/animes?search=${encodeURIComponent(query)}&limit=${limit}&order=popularity`);
   return (Array.isArray(list) ? list : []).map(shikimoriCandidate).filter(Boolean);
 }
 
 export async function getShikimori(id) {
-  const data = await request(`${SHIKI_API}/animes/${encodeURIComponent(String(id).trim())}`);
+  const data = await shikiRequest(`/animes/${encodeURIComponent(String(id).trim())}`);
   return mapShikimoriFull(data);
 }
 

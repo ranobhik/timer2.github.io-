@@ -1094,8 +1094,8 @@ function importTab() {
         <button class="btn" type="submit">${ui.icon("search")} Найти</button>
       </form>
       <p class="hint" style="margin-top:10px">
-        Shikimori и AniList работают без ключей. Кинопоиску нужен токен — укажите его в «Настройках сайта»
-        ${s.kinopoiskToken ? "(токен уже сохранён)" : ""}.
+        Shikimori и AniList работают без ключей и отдают CORS. Кинопоиску нужен токен из «Настроек сайта»
+        ${s.kinopoiskToken ? "(токен уже сохранён)" : ""}; если браузер заблокирует запрос к нему — используйте Shikimori.
       </p>
     </div>
     <div id="importResults"></div>

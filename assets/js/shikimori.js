@@ -1,7 +1,9 @@
 /* Автоподгрузка постеров с Shikimori (публичный API, работает из браузера).
    Запросы кешируются в localStorage, поэтому повторные загрузки мгновенные. */
 
-const API_BASE = "https://shikimori.one/api";
+/* shikimori.one отвечает 301 на shikimori.io; у редиректа нет CORS-заголовков,
+   поэтому в браузере запрос падает. Ходим сразу на shikimori.io, с запасным хостом. */
+const API_HOSTS = ["https://shikimori.io/api", "https://shikimori.one/api"];
 const CACHE_KEY = "rp.posters.v1";
 const SITE = "https://shikimori.one";
 const CACHE_TTL = 1000 * 60 * 60 * 24 * 30; // 30 дней
@@ -57,11 +59,11 @@ export function absoluteShikimoriUrl(url) {
 }
 
 /* ---------- HTTP ---------- */
-async function request(path, timeout = 9000) {
+async function requestOnce(url, timeout) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    const res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetch(url, {
       signal: controller.signal,
       headers: { Accept: "application/json" },
     });
@@ -70,6 +72,22 @@ async function request(path, timeout = 9000) {
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function request(path, timeout = 9000) {
+  let lastError = null;
+  for (const host of API_HOSTS) {
+    try {
+      return await requestOnce(`${host}${path}`, timeout);
+    } catch (error) {
+      lastError = error;
+      if (/HTTP 4\d\d/.test(error?.message || "")) break;
+    }
+  }
+  if (lastError instanceof TypeError || /fetch|network/i.test(lastError?.message || "")) {
+    throw new Error("Нет связи с Shikimori (VPN, блокировщик или офлайн)");
+  }
+  throw lastError;
 }
 
 export async function getAnimeById(id) {

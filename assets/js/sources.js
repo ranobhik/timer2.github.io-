@@ -10,6 +10,7 @@ const SHIKI = "https://shikimori.one";
 const SHIKI_API_HOSTS = ["https://shikimori.io/api", "https://shikimori.one/api"];
 const ANILIST_API = "https://graphql.anilist.co";
 const JIKAN_API = "https://api.jikan.moe/v4";
+const KITSU_API = "https://kitsu.io/api/edge";
 const KINOPOISK_API = "https://api.kinopoisk.dev/v1.4";
 
 export const SOURCE_LABELS = {
@@ -43,7 +44,7 @@ const KIND_LABELS = {
 };
 
 /* ---------- HTTP ---------- */
-async function request(url, { method = "GET", headers = {}, body, timeout = 12000 } = {}) {
+async function request(url, { method = "GET", headers = {}, body, timeout = 8000 } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
@@ -491,7 +492,7 @@ function parseDuration(value) {
 export async function getJikanAnime(malId) {
   const id = Number(malId);
   if (!id) return null;
-  const data = await request(`${JIKAN_API}/anime/${id}`);
+  const data = await request(`${JIKAN_API}/anime/${id}`, { timeout: 7000 });
   const d = data?.data;
   if (!d) return null;
   return {
@@ -520,7 +521,7 @@ export async function fetchEpisodes(malId, limit = 3) {
   if (!malId) return [];
   const episodes = [];
   for (let page = 1; page <= limit; page += 1) {
-    const data = await request(`${JIKAN_API}/anime/${malId}/episodes?page=${page}`);
+    const data = await request(`${JIKAN_API}/anime/${malId}/episodes?page=${page}`, { timeout: 7000 });
     (data?.data || []).forEach((ep) => {
       const number = Number(ep.mal_id) || episodes.length + 1;
       const title = String(ep.title || "").trim();
@@ -535,6 +536,53 @@ export async function fetchEpisodes(malId, limit = 3) {
     if (!data?.pagination?.has_next_page) break;
   }
   return episodes.slice(0, 200);
+}
+
+/* ======================================================================
+   Kitsu — запасной источник названий серий, если Jikan недоступен
+   ====================================================================== */
+function kitsuTitles(attributes) {
+  const titles = attributes?.titles || {};
+  return [attributes?.canonicalTitle, ...Object.values(titles)].filter(Boolean);
+}
+
+export async function fetchKitsuEpisodes(queries = []) {
+  for (const query of queries) {
+    const search = await attempt(() => request(
+      `${KITSU_API}/anime?filter[text]=${encodeURIComponent(query)}&page[limit]=5`,
+      { timeout: 7000 },
+    ));
+    const list = search?.data || [];
+    const hit = list.find((item) => kitsuTitles(item.attributes).some((title) => titleLike(query, title))
+      || kitsuTitles(item.attributes).some((title) => expectedTitlesMatch(title, queries)));
+    if (!hit) continue;
+
+    const episodes = [];
+    for (let offset = 0; offset < 80; offset += 20) {
+      const page = await attempt(() => request(
+        `${KITSU_API}/anime/${hit.id}/episodes?page[limit]=20&page[offset]=${offset}`,
+        { timeout: 7000 },
+      ));
+      const rows = page?.data || [];
+      rows.forEach((row) => {
+        const attributes = row.attributes || {};
+        const number = Number(attributes.number) || episodes.length + 1;
+        episodes.push({
+          number,
+          title: String(attributes.canonicalTitle || "").trim(),
+          date: String(attributes.airdate || "").slice(0, 10),
+          duration: attributes.length ? String(attributes.length) : "",
+        });
+      });
+      if (rows.length < 20) break;
+    }
+    if (episodes.length) return episodes;
+  }
+  return [];
+}
+
+function expectedTitlesMatch(title, queries) {
+  return queries.some((query) => titleLike(query, title));
 }
 
 /* ======================================================================
@@ -637,30 +685,65 @@ export async function enrich(anime, { kinopoiskToken = "", withEpisodes = true, 
   const expected = [...new Set([result.title, result.originalTitle, fallback?.title, fallback?.originalTitle]
     .map((value) => String(value || "").trim()).filter(Boolean))];
 
-  /* 1. Shikimori — русские названия, описание, жанры, постер. */
-  let shiki = result.source === "shikimori" ? result : null;
-  if (!shiki && result.shikimoriId) shiki = await attempt(() => getShikimori(result.shikimoriId));
-  if (!shiki) shiki = await findShikimoriByTitles(queries, expected);
-  if (shiki?.shikimoriId) report.sources.push("Shikimori");
+  /* Запросы идут параллельно: импорт занимает столько времени, сколько нужно самому
+     медленному источнику, а не сумме всех. */
+  const upfrontMal = Number(result.malId) || 0;
+  const hasAllCore = Boolean(result.poster && (result.genres || []).length && result.description);
 
-  /* 2. AniList — баннеры 16:9, постеры, жанры, число серий. */
-  const malFromShiki = Number(shiki?.malId) || 0;
-  const malAny = Number(result.malId) || malFromShiki || 0;
-  let anilist = result.source === "anilist" ? result : null;
-  if (!anilist && malAny) anilist = await attempt(() => getAniListByMal(malAny));
-  if (!anilist) {
-    for (const query of queries) {
-      const list = await attempt(() => searchAniList(query, 1));
-      if (!list?.length) continue;
-      anilist = await attempt(() => getAniList(list[0].sourceId));
-      if (anilist) break;
-    }
-  }
+  /* 1. Shikimori — русские названия, описание, жанры, постер. */
+  const shikiTask = result.source === "shikimori"
+    ? Promise.resolve(result)
+    : (async () => {
+      if (result.shikimoriId) {
+        const byId = await attempt(() => getShikimori(result.shikimoriId));
+        if (byId) return byId;
+      }
+      return findShikimoriByTitles(queries, expected);
+    })();
+
+  /* 2. AniList — баннеры 16:9, постеры, жанры, MAL ID. Если всё уже есть — не тратим время. */
+  const needAniList = !hasAllCore || !upfrontMal;
+  const anilistTask = result.source === "anilist"
+    ? Promise.resolve(result)
+    : (needAniList ? (async () => {
+      if (upfrontMal) {
+        const byMal = await attempt(() => getAniListByMal(upfrontMal));
+        if (byMal) return byMal;
+      }
+      for (const query of queries) {
+        const list = await attempt(() => searchAniList(query, 1));
+        if (!list?.length) continue;
+        const full = await attempt(() => getAniList(list[0].sourceId));
+        if (full) return full;
+      }
+      return null;
+    })() : Promise.resolve(null));
+
+  /* 3. Jikan (MyAnimeList) — жанры, синопсис, названия серий. */
+  const jikanTask = upfrontMal ? attempt(() => getJikanAnime(upfrontMal)) : Promise.resolve(null);
+  const episodesTask = (withEpisodes && upfrontMal) ? attempt(() => fetchEpisodes(upfrontMal)) : Promise.resolve(null);
+
+  const [shiki, anilist, jikanEarly, episodesEarly] = await Promise.all([
+    shikiTask, anilistTask, jikanTask, episodesTask,
+  ]);
+  if (shiki?.shikimoriId) report.sources.push("Shikimori");
   if (anilist?.anilistId) report.sources.push("AniList");
 
-  /* 3. Jikan (MyAnimeList) — жанры и синопсис там есть почти всегда. */
-  const malId = Number(result.malId) || malFromShiki || Number(anilist?.malId) || 0;
-  let jikan = malId ? await attempt(() => getJikanAnime(malId)) : null;
+  const malId = upfrontMal || Number(result.malId) || Number(shiki?.malId) || Number(anilist?.malId) || 0;
+
+  /* MAL ID мог появиться только после ответа Shikimori/AniList — тогда дозапрашиваем
+     Jikan и серии (снова параллельно). */
+  let jikan = jikanEarly;
+  let episodeList = episodesEarly || [];
+  if (malId && (!jikan || (withEpisodes && !episodeList.length))) {
+    const [lateJikan, lateEpisodes] = await Promise.all([
+      jikan ? Promise.resolve(jikan) : attempt(() => getJikanAnime(malId)),
+      (withEpisodes && !episodeList.length) ? attempt(() => fetchEpisodes(malId)) : Promise.resolve(null),
+    ]);
+    jikan = lateJikan || jikan;
+    episodeList = lateEpisodes?.length ? lateEpisodes : episodeList;
+  }
+
   // MAL ID мог прийти из Shikimori и указывать на другой тайтл — сверяем названия.
   if (jikan) {
     const known = [...expected, anilist?.title, anilist?.originalTitle].filter(Boolean);
@@ -674,8 +757,17 @@ export async function enrich(anime, { kinopoiskToken = "", withEpisodes = true, 
   }
   if (jikan) report.sources.push("MyAnimeList");
 
+  /* 4. Названия серий: если Jikan недоступен (частая блокировка) — берём с Kitsu. */
+  if (withEpisodes && !episodeList.length) {
+    const kitsu = (await attempt(() => fetchKitsuEpisodes(queries))) || [];
+    if (kitsu.length) {
+      episodeList = kitsu;
+      report.sources.push("Kitsu");
+    }
+  }
+
   /* ---------- Названия ---------- */
-  const ruTitle = [result.title, shiki?.title].find((value) => hasCyrillic(value) && value.trim())
+  const ruTitle = [result.title, shiki?.title].find((value) => value && hasCyrillic(value) && value.trim())
     || result.title || shiki?.title || anilist?.title || jikan?.title || "Без названия";
   const previousTitle = result.title;
   result.title = ruTitle;
@@ -739,15 +831,17 @@ export async function enrich(anime, { kinopoiskToken = "", withEpisodes = true, 
   result.malId = malId || Number(jikan?.malId) || 0;
   if (Array.isArray(anilist?.screenshots) && !result.screenshots?.length) result.screenshots = anilist.screenshots;
 
-  /* ---------- Эпизоды: названия серий с MyAnimeList ---------- */
-  let episodeList = [];
-  if (withEpisodes && malId) episodeList = (await attempt(() => fetchEpisodes(malId))) || [];
+  /* ---------- Эпизоды ---------- */
   const counts = [
     Number(result.episodesCount), Number(shiki?.episodesCount), Number(anilist?.episodesCount),
     Number(jikan?.episodesCount), episodeList.length,
   ].filter((count) => count > 0);
   result.episodesCount = counts.length ? Math.max(...counts) : 0;
-  if (episodeList.length) result.episodeList = episodeList;
+  if (episodeList.length) {
+    result.episodeList = episodeList
+      .map((ep, index) => ({ ...ep, number: Number(ep.number) || index + 1 }))
+      .sort((a, b) => a.number - b.number);
+  }
   report.episodes = result.episodesCount;
 
   result.report = report;

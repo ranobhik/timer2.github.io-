@@ -193,6 +193,7 @@ export function normalizeCatalog(raw) {
 /* ================= Загрузка каталога ================= */
 let state = {
   catalog: null,
+  published: null, // каталог из data/catalog.json (без черновика)
   source: "default", // catalog | draft | default
   draftSavedAt: "",
   loadError: "",
@@ -231,7 +232,13 @@ export async function loadCatalog() {
   }
 
   state.catalog = catalog;
+  state.published = fresh;
   return catalog;
+}
+
+/** Каталог из data/catalog.json — без локального черновика. */
+export function getPublishedCatalog() {
+  return state.published || state.catalog;
 }
 
 export function getState() {

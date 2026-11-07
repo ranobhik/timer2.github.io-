@@ -139,6 +139,13 @@ check("Импорт: 12 серий", window.document.querySelectorAll("#episodeE
 const firstTitle = window.document.querySelector("#episodeEditor [data-ep-field='title']")?.value || "";
 check("Импорт: название серии переведено", firstTitle === "Перевод: The Mask of the God of War", firstTitle);
 
+/* кнопка «Добавить плеер» действительно добавляет плеер */
+const before = window.document.querySelectorAll("#episodeEditor [data-player-index]").length;
+window.document.querySelector('#episodeEditor [data-player-add="0"]')?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+await wait(150);
+const after = window.document.querySelectorAll("#episodeEditor [data-player-index]").length;
+check("«Добавить плеер» добавляет плеер", after === before + 1, `${before} → ${after}`);
+
 /* кнопки Kodik и перевода на месте, без токена не падают */
 const kodikBtn = window.document.querySelector("#kodikPlayers");
 const translateBtn = window.document.querySelector("#translateTitles");

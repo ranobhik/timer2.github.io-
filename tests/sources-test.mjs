@@ -199,6 +199,12 @@ const dubItems = cvh.filter((item) => item.studio.toLowerCase().includes("раб
 check("CVH: только нужная озвучка", dubItems.length === 2 && dubItems.every((i) => i.studio === "Рабочая партия"), String(dubItems.length));
 const stream = await sources.cvhVideo({ vkId: "111" });
 check("CVH: ссылка на поток", stream.url === "https://vd.okcdn.ru/720", stream.url);
+const cvhDub = sources.cvhEpisodes([
+  { episode: 1, vkId: "1", studio: "Рабочая партия", title: "The Mask" },
+  { episode: 2, vkId: "2", studio: "Рабочая партия", title: "Smoke" },
+  { episode: 1, vkId: "3", studio: "AniLibria", title: "The Mask" },
+], { translation: "Рабочая партия" });
+check("CVH: серии нужной озвучки", cvhDub.length === 2 && cvhDub[0].title === "The Mask", JSON.stringify(cvhDub));
 check("CVH: ссылка плеера", sources.cvhPlayerUrl("111") === "cvh:111" && sources.cvhIdFromUrl("cvh:111") === "111");
 
 /* Kodik → карточки каталога */

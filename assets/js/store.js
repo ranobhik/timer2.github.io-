@@ -152,6 +152,7 @@ export function normalizeAnime(raw, index = 0) {
     poster: String(item.poster || ""),
     banner: String(item.banner || ""),
     shikimoriId: String(item.shikimoriId || ""),
+    malId: Number(item.malId) || 0,
     cvhId: String(item.cvhId || ""),
     source: String(item.source || ""),
     studio: String(item.studio || ""),

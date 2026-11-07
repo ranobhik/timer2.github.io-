@@ -1178,6 +1178,39 @@ main { display: block; min-height: 60vh; padding-bottom: 40px; }
   border: 0;
 }
 .player-frame video { object-fit: contain; background: #000; }
+
+/* Выбор качества в плеере CVH */
+.cvh-player {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: #000;
+}
+.cvh-player video {
+  width: 100%;
+  max-height: min(72vh, 620px);
+  flex: 1 1 auto;
+}
+.cvh-quality {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(10, 12, 20, 0.92);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.cvh-quality-label {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.6;
+}
+.cvh-quality .btn.is-active {
+  border-color: var(--accent, #f43f5e);
+  color: #fff;
+  background: color-mix(in srgb, var(--accent, #f43f5e) 26%, transparent);
+}
 .player-frame .player-inner { overflow: auto; }
 
 .player-placeholder {

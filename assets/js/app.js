@@ -633,8 +633,17 @@ function initRails() {
       if (next) next.disabled = scroller.scrollLeft >= max - 4;
     };
 
+    /* Шаг всегда кратен карточке — после листания не остаётся обрезанных карточек */
+    const cardStep = () => {
+      const first = scroller.firstElementChild;
+      const second = scroller.children[1];
+      if (!first) return Math.round(scroller.clientWidth * 0.86);
+      const gap = second ? second.offsetLeft - first.offsetLeft - first.offsetWidth : 0;
+      return Math.max(1, Math.round(first.offsetWidth + Math.max(0, gap)));
+    };
     const step = (direction) => {
-      scroller.scrollBy({ left: direction * scroller.clientWidth * 0.86, behavior: "smooth" });
+      const perPage = Math.max(1, Math.floor((scroller.clientWidth + 1) / cardStep()));
+      scroller.scrollBy({ left: direction * perPage * cardStep(), behavior: "smooth" });
     };
     prev?.addEventListener("click", () => step(-1));
     next?.addEventListener("click", () => step(1));

@@ -722,7 +722,7 @@ main { display: block; min-height: 60vh; padding-bottom: 40px; }
 /* ==========================================================================
    Ряды и карточки
    ========================================================================== */
-.section { margin-top: clamp(28px, 4.4vw, 54px); }
+.section { margin-top: clamp(28px, 4.4vw, 54px); scroll-margin-top: 96px; }
 .section-head {
   display: flex;
   align-items: baseline;
@@ -745,17 +745,20 @@ main { display: block; min-height: 60vh; padding-bottom: 40px; }
 
 .rail { position: relative; }
 .row-scroller {
+  /* Сколько карточек помещается в ряд: обрезанных карточек по краям не остаётся */
+  --per: 6;
+  --gap: clamp(10px, 1.4vw, 18px);
   display: flex;
-  gap: clamp(10px, 1.4vw, 18px);
+  gap: var(--gap);
   overflow-x: auto;
   overflow-y: hidden;
   padding-bottom: 8px;
-  scroll-snap-type: x proximity;
+  scroll-snap-type: x mandatory;
   scrollbar-width: thin;
   -webkit-overflow-scrolling: touch;
 }
 .rail .row-scroller {
-  scroll-snap-type: none;
+  scroll-snap-type: x mandatory;
   scroll-behavior: smooth;
   cursor: grab;
   padding-top: 8px;
@@ -763,6 +766,8 @@ main { display: block; min-height: 60vh; padding-bottom: 40px; }
   margin-top: -6px;
 }
 .rail .row-scroller.is-dragging {
+  /* во время перетаскивания привязка к карточкам не мешает */
+  scroll-snap-type: none;
   cursor: grabbing;
   scroll-behavior: auto;
   user-select: none;
@@ -791,13 +796,19 @@ main { display: block; min-height: 60vh; padding-bottom: 40px; }
 }
 .rail-arrow svg { width: 20px; height: 20px; }
 .rail.has-overflow .rail-arrow:not(:disabled) { opacity: 1; pointer-events: auto; }
+@media (hover: none) { .rail-arrow { display: none; } }
 .rail-arrow:hover { background: var(--accent); color: #fff; border-color: transparent; }
 .rail-arrow.prev { left: 2px; }
 .rail-arrow.next { right: 2px; }
 .row-scroller > * {
-  flex: 0 0 clamp(138px, 22vw, 196px);
+  flex: 0 0 calc((100% - (var(--per) - 1) * var(--gap)) / var(--per));
+  min-width: 0;
   scroll-snap-align: start;
 }
+@media (max-width: 1199px) { .row-scroller { --per: 5; } }
+@media (max-width: 991px) { .row-scroller { --per: 4; } }
+@media (max-width: 767px) { .row-scroller { --per: 3; } }
+@media (max-width: 575px) { .row-scroller { --per: 2; } }
 
 .grid-cards {
   display: grid;
@@ -1415,6 +1426,17 @@ main { display: block; min-height: 60vh; padding-bottom: 40px; }
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+/* Постер не загрузился — показываем значок, а не пустой прямоугольник */
+.poster-preview.is-broken::before {
+  content: "!";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  color: var(--muted);
+  background: repeating-linear-gradient(45deg, var(--surface-2) 0 6px, var(--surface-3) 6px 12px);
 }
 
 .switch {

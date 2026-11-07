@@ -116,6 +116,12 @@ globalThis.fetch = async (url, opts = {}) => {
   } else if (u.includes("plapi.cdnvideohub.com") && u.includes("/video/")) {
     body = { duration: 1400, thumbUrl: "https://iv.okcdn.ru/p.jpg", sources: { mpegFullHdUrl: "", mpegHighUrl: "https://vd.okcdn.ru/720", hlsUrl: "https://vd.okcdn.ru/master.m3u8" } }; status = 200;
   }
+  if (u.includes("api.jikan.moe/v4/anime?q=") || u.includes("api.jikan.moe/v4/anime?q")) {
+    body = { data: [{ mal_id: 61999, title: "Shuiro no Kamen", year: 2026 }] }; status = 200;
+  }
+  if (u.includes("kodikapi.com/list")) {
+    body = { results: [{ ...KODIK_ITEM, shikimori_id: "61999" }], next_page: "" }; status = 200;
+  }
   return { ok: status === 200, status, json: async () => body };
 };
 
@@ -194,6 +200,18 @@ check("CVH: только нужная озвучка", dubItems.length === 2 && 
 const stream = await sources.cvhVideo({ vkId: "111" });
 check("CVH: ссылка на поток", stream.url === "https://vd.okcdn.ru/720", stream.url);
 check("CVH: ссылка плеера", sources.cvhPlayerUrl("111") === "cvh:111" && sources.cvhIdFromUrl("cvh:111") === "111");
+
+/* Kodik → карточки каталога */
+check("Транслит в slug", sources.translitSlug("Маска вермильона") === "maska-vermilonа" || sources.translitSlug("Маска вермильона").startsWith("maska-vermi"), sources.translitSlug("Маска вермильона"));
+const catalogEntries = sources.kodikCatalogEntries([KODIK_ITEM], { translation: "Рабочая партия" });
+check("Kodik→карточка: серии с плеерами", catalogEntries.length === 1 && catalogEntries[0].episodes.length === 2, JSON.stringify(catalogEntries[0]?.episodes?.length));
+check("Kodik→карточка: плеер это ссылка Kodik", /kodik\.info/.test(catalogEntries[0].episodes[0].players[0].url), catalogEntries[0]?.episodes?.[0]?.players?.[0]?.url);
+check("Kodik→карточка: постер по Shikimori ID", /shikimori/.test(catalogEntries[0].poster), catalogEntries[0].poster);
+check("Kodik→карточка: чужая озвучка отфильтрована", sources.kodikCatalogEntries([KODIK_ITEM], { translation: "AniLibria" }).length === 0);
+
+/* Поиск MAL ID по названию */
+const malId = await sources.resolveMalId("Shuiro no Kamen", 2026);
+check("Поиск MAL ID по названию", malId === 61999, String(malId));
 
 /* Ключи API хранятся в браузере */
 store.saveKeys({ kodikToken: "k", kinopoiskToken: "p", cvhToken: "c" });

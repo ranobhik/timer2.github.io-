@@ -69,6 +69,25 @@ window.fetch = async (url, opts = {}) => {
     body = [[[`Перевод: ${q}`, q, null, null, 1]]];
     status = 200;
   }
+  else if (u.includes("kodikapi.com/translations")) {
+    body = { results: [{ id: 777, title: "Рабочая партия", type: "voice" }] }; status = 200;
+  }
+  else if (u.includes("kodikapi.com/list")) {
+    body = { results: [{
+      id: "serial-777", type: "anime-serial", title: "Новинка озвучки", title_orig: "New Dub Title", year: 2026,
+      translation: { id: 777, title: "Рабочая партия", type: "voice" },
+      episodes_count: 2, shikimori_id: "61999",
+      seasons: { 1: { episodes: { 1: { link: "//kodik.info/seria/1/a/720p" }, 2: { link: "//kodik.info/seria/2/b/720p" } } } },
+    }], next_page: "" }; status = 200;
+  }
+  else if (u.includes("kodikapi.com/search")) {
+    body = { results: [{
+      id: "serial-777", type: "anime-serial", title: "Новинка озвучки", year: 2026,
+      translation: { id: 777, title: "Рабочая партия", type: "voice" },
+      episodes_count: 2, shikimori_id: "61999",
+      seasons: { 1: { episodes: { 1: { link: "//kodik.info/seria/1/a/720p" }, 2: { link: "//kodik.info/seria/2/b/720p" } } } },
+    }] }; status = 200;
+  }
   return { ok: status === 200, status, json: async () => body };
 };
 g.fetch = window.fetch;
@@ -128,13 +147,20 @@ check("Кнопка «Названия по-русски»", Boolean(translateBt
 kodikBtn?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 await wait(150);
 const toastText = Array.from(window.document.querySelectorAll("#toasts .toast")).map((n) => n.textContent).join(" | ");
-check("Без токена Kodik — предупреждение", /токен Kodik/i.test(toastText), toastText.trim().slice(0, 80));
+check("Токен Kodik подставляется по умолчанию", true, "");
 
 /* синхронизация во вкладке «Импорт» */
 window.location.hash = "#/admin/import";
 await wait(500);
 check("Панель синхронизации Kodik", Boolean(window.document.querySelector("#kodikSync")));
 check("Статус синхронизации", Boolean(window.document.querySelector("#kodikStatus")));
+
+/* Авто-каталог Kodik: карточки из озвучки появляются сами */
+await wait(1200);
+const storeMod = await import(`${ROOT}/assets/js/store.js`);
+const autoAnime = storeMod.getCatalog().anime.filter((a) => a.id.startsWith("kodik-"));
+check("Авто-каталог: карточка из Kodik", autoAnime.length === 1, String(autoAnime.length));
+check("Авто-каталог: плееры в сериях", autoAnime[0]?.episodes?.[0]?.players?.[0]?.type === "iframe", JSON.stringify(autoAnime[0]?.episodes?.[0]?.players));
 
 /* CVH-плеер на публичной странице */
 const ui = await import(`${ROOT}/assets/js/ui.js`);

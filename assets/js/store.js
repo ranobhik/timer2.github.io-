@@ -2,6 +2,7 @@
    настройки пользователя и «авторизация» админки. */
 
 import { clone, hashString, slugify, uid } from "./utils.js";
+import { DEFAULT_KEYS } from "./config.js";
 
 const DRAFT_KEY = "rp.draft.v1";
 const PREFS_KEY = "rp.prefs.v1";
@@ -70,6 +71,8 @@ export const DEFAULT_SETTINGS = {
   cvhPub: "747",
   cvhAggr: "mali",
   cvhTranslation: "Рабочая партия",
+  autoPlayers: true,
+  kodikAuto: true,
   corsProxy: "",
   translateEpisodes: true,
 };
@@ -283,13 +286,19 @@ export function saveDraft(catalog) {
 const KEYS_KEY = "rp.keys.v1";
 
 export function getKeys() {
+  let stored = {};
   try {
     const raw = window.localStorage.getItem(KEYS_KEY);
     const data = raw ? JSON.parse(raw) : null;
-    return data && typeof data === "object" ? data : {};
+    if (data && typeof data === "object") stored = data;
   } catch {
-    return {};
+    stored = {};
   }
+  const merged = { ...DEFAULT_KEYS };
+  Object.entries(stored).forEach(([key, value]) => {
+    if (String(value ?? "").trim()) merged[key] = value;
+  });
+  return merged;
 }
 
 export function saveKeys(patch = {}) {

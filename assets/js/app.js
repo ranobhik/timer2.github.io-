@@ -3,6 +3,7 @@
 import * as store from "./store.js";
 import * as ui from "./ui.js";
 import { applyCachedPosters } from "./shikimori.js";
+import * as sources from "./sources.js";
 import {
   $, $$, attr, debounce, esc, formatDate, hueFrom, matchesSearch, pluralEpisodes, safeUrl, statusLabel,
 } from "./utils.js";
@@ -45,6 +46,90 @@ async function boot() {
   if (store.getState().loadError) {
     ui.toast("Каталог data/catalog.json не загружен — открыт пустой проект", "err");
   }
+
+  loadAutoCatalog();
+}
+
+/* =======================================================================
+   Авто-каталог Kodik: всё, что залито в плееры нужной озвучки,
+   появляется на сайте само (кэш 6 часов, ничего не публикуется в git)
+   ======================================================================= */
+const AUTO_KEY = "rp.auto.v1";
+const AUTO_TTL = 6 * 60 * 60 * 1000;
+let autoLoaded = false;
+
+function readAutoCache() {
+  try {
+    const raw = window.localStorage.getItem(AUTO_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data?.entries)) return null;
+    if (Date.now() - Number(data.savedAt || 0) > AUTO_TTL) return null;
+    return data.entries;
+  } catch {
+    return null;
+  }
+}
+
+function writeAutoCache(entries) {
+  try {
+    window.localStorage.setItem(AUTO_KEY, JSON.stringify({ savedAt: Date.now(), entries }));
+  } catch {
+    // нет места — просто не кэшируем
+  }
+}
+
+async function loadAutoCatalog() {
+  const s = settings();
+  if (!s.kodikAuto || autoLoaded) return;
+  const keys = store.getKeys();
+  if (!keys.kodikToken) return;
+
+  const cached = readAutoCache();
+  if (cached) {
+    mergeAutoCatalog(cached);
+    return;
+  }
+
+  const proxy = String(s.corsProxy || "").trim();
+  const filter = String(s.kodikTranslation || "Рабочая партия").trim();
+  try {
+    const list = await sources.kodikTranslations({ token: keys.kodikToken, proxy });
+    const found = list.filter((item) => item.title.toLowerCase().includes(filter.toLowerCase()));
+    if (!found.length) {
+      console.debug("Авто-каталог: озвучка не найдена в Kodik");
+      return;
+    }
+    const items = await sources.kodikList({ token: keys.kodikToken, translationId: found[0].id, proxy, maxPages: 2 });
+    const entries = sources.kodikCatalogEntries(items, { translation: found[0].title });
+    if (!entries.length) return;
+    writeAutoCache(entries);
+    mergeAutoCatalog(entries);
+  } catch (error) {
+    console.debug("Авто-каталог Kodik недоступен:", error?.message);
+  }
+}
+
+function mergeAutoCatalog(entries) {
+  if (!Array.isArray(entries) || !entries.length) return;
+  if (/^#\/admin/.test(location.hash)) return;
+  const current = store.getCatalog();
+  const known = new Set();
+  current.anime.forEach((anime) => {
+    if (anime.shikimoriId) known.add(`s${anime.shikimoriId}`);
+    known.add(`t${String(anime.title || "").toLowerCase()}`);
+  });
+  const fresh = entries.filter((entry) => {
+    if (entry.shikimoriId && known.has(`s${entry.shikimoriId}`)) return false;
+    return !known.has(`t${String(entry.title || "").toLowerCase()}`);
+  });
+  if (!fresh.length) return;
+
+  autoLoaded = true;
+  const merged = store.normalizeCatalog({ ...current, anime: [...current.anime, ...fresh] });
+  store.setCatalog(merged);
+  catalog = merged;
+  render();
 }
 
 function settings() {

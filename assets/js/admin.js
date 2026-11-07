@@ -2,6 +2,7 @@
 
 import * as store from "./store.js";
 import * as ui from "./ui.js";
+import { fetchPosterSmart, posterCacheKey, setCachedPoster } from "./shikimori.js";
 import {
   $, $$, attr, clone, esc, formatDate, hueFrom, safeUrl, slugify, STATUS_LABELS, uid,
 } from "./utils.js";
@@ -141,6 +142,7 @@ function contentTab() {
           <div class="row-actions">
             <a class="btn btn-soft btn-sm" href="#/admin/edit/${attr(anime.id)}">${ui.icon("edit")} Изменить</a>
             <a class="btn btn-ghost btn-sm" href="#/anime/${attr(anime.id)}" title="Открыть на сайте">${ui.icon("external")}</a>
+            <button class="btn btn-ghost btn-sm" type="button" data-fetch-poster="${attr(anime.id)}" title="Обновить постер с Shikimori">${ui.icon("download")}</button>
             <button class="btn btn-ghost btn-sm" type="button" data-duplicate="${attr(anime.id)}" title="Дублировать">${ui.icon("copy")}</button>
             <button class="btn btn-ghost btn-sm" type="button" data-delete="${attr(anime.id)}" title="Удалить">${ui.icon("trash")}</button>
           </div>
@@ -160,7 +162,12 @@ function contentTab() {
         <h2>Каталог · ${draftCatalog.anime.length}</h2>
         <p>Переключатели: публикация на сайте и участие в подборке на главной.</p>
       </div>
-      <a class="btn" href="#/admin/new">${ui.icon("plus")} Добавить аниме</a>
+      <div class="row-actions">
+        <button class="btn btn-ghost btn-sm" type="button" id="bulkPosters" title="Подтянуть постеры для всех аниме без картинки">
+          ${ui.icon("download")} Постеры
+        </button>
+        <a class="btn" href="#/admin/new">${ui.icon("plus")} Добавить аниме</a>
+      </div>
     </div>
     <div class="field" style="margin-bottom:14px;max-width:360px">
       <input type="search" id="adminSearch" placeholder="Поиск по названию или id…" />
@@ -228,6 +235,59 @@ function bindContentTab() {
     });
   });
 
+  $("#bulkPosters")?.addEventListener("click", async (event) => {
+    const btn = event.currentTarget;
+    const targets = draftCatalog.anime.filter((anime) => !anime.poster);
+    if (!targets.length) { ui.toast("У всех аниме уже есть постеры", "info"); return; }
+    const original = btn.innerHTML;
+    btn.disabled = true;
+    let ok = 0;
+    for (let i = 0; i < targets.length; i += 1) {
+      btn.textContent = `Постеры ${i + 1}/${targets.length}…`;
+      try {
+        const data = await fetchPosterSmart(targets[i]);
+        if (data?.poster) {
+          targets[i].poster = data.poster;
+          if (!targets[i].shikimoriId && data.shikimoriId) targets[i].shikimoriId = data.shikimoriId;
+          setCachedPoster(posterCacheKey(targets[i]), data.poster);
+          ok += 1;
+        }
+      } catch (error) {
+        console.debug("poster:", error?.message);
+      }
+    }
+    btn.disabled = false;
+    btn.innerHTML = original;
+    try {
+      store.saveDraft(draftCatalog);
+      ui.toast(ok ? `Постеры обновлены: ${ok} из ${targets.length}` : "Не удалось получить постеры", ok ? "ok" : "err");
+    } catch (error) {
+      ui.toast(error.message, "err");
+    }
+    ctx.refresh();
+  });
+
+  $$("[data-fetch-poster]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const anime = draftCatalog.anime.find((item) => item.id === btn.dataset.fetchPoster);
+      if (!anime) return;
+      btn.disabled = true;
+      try {
+        const data = await fetchPosterSmart(anime);
+        if (!data?.poster) throw new Error("Постер не найден на Shikimori");
+        anime.poster = data.poster;
+        if (!anime.shikimoriId && data.shikimoriId) anime.shikimoriId = data.shikimoriId;
+        setCachedPoster(posterCacheKey(anime), data.poster);
+        store.saveDraft(draftCatalog);
+        ui.toast("Постер обновлён", "ok");
+        ctx.refresh();
+      } catch (error) {
+        ui.toast(error?.message || "Не удалось получить постер", "err");
+        btn.disabled = false;
+      }
+    });
+  });
+
   $$("[data-delete]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const id = btn.dataset.delete;
@@ -264,6 +324,7 @@ function blankAnime() {
     description: "",
     poster: "",
     banner: "",
+    shikimoriId: "",
     studio: "",
     director: "",
     country: "Япония",
@@ -405,6 +466,7 @@ function editorHTML(anime, isNew) {
         ${fieldHTML({ label: "Режиссёр", name: "director", value: anime.director })}
         ${fieldHTML({ label: "Страна", name: "country", value: anime.country })}
         ${fieldHTML({ label: "Теги", name: "tags", value: anime.tags.join(", "), hint: "через запятую" })}
+        ${fieldHTML({ label: "Shikimori ID", name: "shikimoriId", value: anime.shikimoriId, placeholder: "16498", hint: "для автопостера" })}
 
         <div class="field span-2">
           <label>Описание</label>
@@ -417,16 +479,21 @@ function editorHTML(anime, isNew) {
         </div>
 
         <div class="field span-2">
-          <label for="f-poster">Постер <small>ссылка на картинку или загрузка файла</small></label>
+          <label for="f-poster">Постер <small>ссылка, файл или Shikimori</small></label>
           <div class="field-row">
-            <input id="f-poster" name="poster" type="text" value="${attr(anime.poster)}" placeholder="https://…/poster.jpg" style="flex:1 1 240px" />
+            <input id="f-poster" name="poster" type="text" value="${attr(anime.poster)}" placeholder="https://…/poster.jpg" style="flex:1 1 220px" />
+            <button class="btn btn-soft btn-sm" type="button" id="fetchPoster" title="Найти постер и данные на Shikimori">
+              ${ui.icon("download")} С Shikimori
+            </button>
             <label class="btn btn-ghost btn-sm" style="margin:0">
               ${ui.icon("upload")} Файл
               <input type="file" accept="image/*" data-upload="poster" class="visually-hidden" />
             </label>
-            ${anime.poster ? `<span class="mini-poster" style="--h:${hueFrom(anime.title)};width:46px;height:64px;position:relative;border-radius:8px;overflow:hidden;background:var(--surface-3)">${ui.posterInner(anime)}</span>` : ""}
+            <span class="poster-preview${anime.poster ? "" : " hide"}" id="posterPreview">
+              ${anime.poster ? `<img src="${attr(safeUrl(anime.poster))}" alt="" onerror="this.remove()" />` : ""}
+            </span>
           </div>
-          <p class="hint">Лучше ссылка: загруженные изображения хранятся в localStorage и расходуют его лимит.</p>
+          <p class="hint">Укажите Shikimori ID — постер, год, рейтинг и жанры подтянутся автоматически. Загруженные файлы хранятся в localStorage (лимит ~5 МБ).</p>
         </div>
 
         <div class="field span-2">
@@ -518,6 +585,7 @@ function captureEditorValues() {
   editorModel.description = get("description").trim();
   editorModel.poster = get("poster").trim();
   editorModel.banner = get("banner").trim();
+  editorModel.shikimoriId = get("shikimoriId").trim();
   editorModel.published = form.elements.published.checked;
   editorModel.featured = form.elements.featured.checked;
   editorModel.genres = $$("[data-genre-check]:checked").map((input) => input.value);
@@ -647,12 +715,37 @@ function goAdmin(hash) {
   else location.hash = hash;
 }
 
-function saveEditor() {
+let savingEditor = false;
+
+async function saveEditor() {
+  if (savingEditor) return;
+  savingEditor = true;
+  try {
+    await saveEditorInner();
+  } finally {
+    savingEditor = false;
+  }
+}
+
+async function saveEditorInner() {
   captureEditorValues();
   if (!editorModel.title) {
     ui.toast("Укажите название аниме", "err");
     $("#f-title")?.focus();
     return;
+  }
+  if (!editorModel.poster) {
+    const statusEl = document.getElementById("editorStatus");
+    if (statusEl) statusEl.textContent = "Ищу постер на Shikimori…";
+    try {
+      const data = await fetchPosterSmart(editorModel);
+      if (data?.poster) {
+        editorModel.poster = data.poster;
+        if (!editorModel.shikimoriId && data.shikimoriId) editorModel.shikimoriId = data.shikimoriId;
+      }
+    } catch (error) {
+      console.debug("poster:", error?.message);
+    }
   }
   if (!editorModel.episodes.length) {
     editorModel.episodes.push({
@@ -684,9 +777,80 @@ function saveEditor() {
   }
 }
 
+function updatePosterPreview(url) {
+  const box = document.getElementById("posterPreview");
+  if (!box) return;
+  const src = safeUrl(url);
+  box.classList.toggle("hide", !src);
+  box.innerHTML = src ? `<img src="${attr(src)}" alt="" onerror="this.remove()" />` : "";
+}
+
+function setField(name, value) {
+  if (value === undefined || value === null || value === "") return;
+  const input = $(`[name="${name}"]`);
+  if (input) input.value = String(value);
+}
+
+function applyShikimoriFields(data) {
+  if (data.shikimoriId) setField("shikimoriId", data.shikimoriId);
+  setField("poster", data.poster);
+  setField("originalTitle", data.originalTitle);
+  const titleInput = $("[name='title']");
+  if (titleInput && !titleInput.value.trim() && data.title) setField("title", data.title);
+  setField("year", data.year);
+  setField("rating", data.rating);
+  const descInput = $("[name='description']");
+  if (descInput && !descInput.value.trim() && data.description) descInput.value = data.description;
+
+  (data.genres || []).forEach((genre) => {
+    if (!draftCatalog.genres.includes(genre)) draftCatalog.genres.push(genre);
+    const existing = Array.from(document.querySelectorAll("[data-genre-check]"))
+      .find((input) => input.value === genre);
+    if (existing) {
+      existing.checked = true;
+      return;
+    }
+    const wrap = document.querySelector(".tag-list");
+    if (!wrap) return;
+    const label = document.createElement("label");
+    label.className = "chip";
+    label.style.cursor = "pointer";
+    label.innerHTML = `<input type="checkbox" data-genre-check value="${attr(genre)}" checked style="accent-color:var(--accent)" /> ${esc(genre)}`;
+    wrap.append(label);
+  });
+
+  updatePosterPreview(data.poster);
+  const statusEl = document.getElementById("editorStatus");
+  if (statusEl) statusEl.textContent = "Данные Shikimori загружены — не забудьте сохранить";
+  const form = $("#animeForm");
+  if (form) captureEditorValues();
+}
+
+async function handlePosterFetch(btn) {
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = "Ищу…";
+  try {
+    if (editorModel) captureEditorValues();
+    const data = await fetchPosterSmart(editorModel || {});
+    if (!data || (!data.poster && !data.title)) throw new Error("Ничего не найдено на Shikimori");
+    applyShikimoriFields(data);
+    if (data.fallback) ui.toast("API Shikimori недоступен — постер подставлен по ID", "ok");
+    else ui.toast(data.poster ? "Данные и постер подтянуты" : "Данные найдены, но постера нет", "ok");
+  } catch (error) {
+    ui.toast(error?.message || "Не удалось получить данные с Shikimori", "err");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
+}
+
 function bindEditor(anime, isNew) {
   bindEpisodeControls();
   $("#addEpisode")?.addEventListener("click", addEpisode);
+
+  $("#fetchPoster")?.addEventListener("click", (event) => handlePosterFetch(event.currentTarget));
+  $("#f-poster")?.addEventListener("input", (event) => updatePosterPreview(event.target.value));
 
   // загрузка изображений в data URL
   $$("[data-upload]").forEach((input) => {

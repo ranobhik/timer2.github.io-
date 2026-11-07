@@ -190,7 +190,8 @@
             }
           ]
         }
-      ]
+      ],
+      "shikimoriId": "16498"
     },
     {
       "id": "jujutsu-kaisen",
@@ -288,7 +289,8 @@
             }
           ]
         }
-      ]
+      ],
+      "shikimoriId": "40748"
     },
     {
       "id": "demon-slayer",
@@ -386,7 +388,8 @@
             }
           ]
         }
-      ]
+      ],
+      "shikimoriId": "38000"
     },
     {
       "id": "chainsaw-man",
@@ -447,7 +450,8 @@
             }
           ]
         }
-      ]
+      ],
+      "shikimoriId": "44511"
     },
     {
       "id": "death-note",
@@ -545,7 +549,8 @@
             }
           ]
         }
-      ]
+      ],
+      "shikimoriId": "1535"
     },
     {
       "id": "fullmetal-alchemist",
@@ -643,7 +648,8 @@
             }
           ]
         }
-      ]
+      ],
+      "shikimoriId": "5114"
     },
     {
       "id": "spy-family",
@@ -764,7 +770,8 @@
             }
           ]
         }
-      ]
+      ],
+      "shikimoriId": "50265"
     },
     {
       "id": "violet-evergarden",
@@ -862,7 +869,8 @@
             }
           ]
         }
-      ]
+      ],
+      "shikimoriId": "33352"
     },
     {
       "id": "one-piece",
@@ -939,7 +947,8 @@
             }
           ]
         }
-      ]
+      ],
+      "shikimoriId": "21"
     },
     {
       "id": "hunter-x-hunter",
@@ -1037,7 +1046,8 @@
             }
           ]
         }
-      ]
+      ],
+      "shikimoriId": "11061"
     }
   ]
 }

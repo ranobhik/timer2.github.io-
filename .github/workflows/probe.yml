@@ -15,6 +15,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: run probes
         run: |
+          set +e
           OUT=probe-out.txt
           : > $OUT
           T=d6a9c41c60eae7abeb43f91ea50e2302
@@ -35,7 +36,9 @@ jobs:
           echo >> $OUT
           wc -c $OUT
       - name: publish results
+        if: always()
         run: |
+          set +e
           git config user.name probe
           git config user.email probe@example.com
           git add probe-out.txt

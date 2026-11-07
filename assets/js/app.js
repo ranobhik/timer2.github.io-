@@ -314,6 +314,7 @@ async function render() {
       <p><a class="btn" href="#/">На главную</a></p></div>`;
   }
 
+  initRails();
   if (scrollTop) window.scrollTo(0, 0);
 }
 
@@ -340,11 +341,13 @@ function heroSlideHTML({ anime, label }, index) {
   const banner = safeUrl(anime.banner);
   const poster = safeUrl(anime.poster);
   const mediaClass = banner ? "has-banner" : poster ? "is-poster" : "is-empty";
-  const bgUrl = (banner || poster).replace(/"/g, "%22");
+  const mediaUrl = banner || poster;
+  const media = mediaUrl
+    ? `<img class="hero-media-img" src="${attr(mediaUrl)}" alt="" referrerpolicy="no-referrer"
+        loading="${index === 0 ? "eager" : "lazy"}" decoding="async" draggable="false" onerror="this.remove()" />`
+    : "";
   return `<article class="hero-slide" data-slide="${index}" aria-hidden="${index !== 0}">
-    <div class="hero-media ${mediaClass}" style="--h:${hueFrom(anime.title)}" data-bg="${attr(bgUrl)}">
-      <div class="hero-media-img"></div>
-    </div>
+    <div class="hero-media ${mediaClass}" style="--h:${hueFrom(anime.title)}">${media}</div>
     <div class="hero-scrim"></div>
     <div class="hero-content">
       <span class="eyebrow">${esc(label)}</span>
@@ -356,7 +359,7 @@ function heroSlideHTML({ anime, label }, index) {
         <a class="btn btn-ghost" href="#/anime/${attr(anime.id)}">О сериале</a>
       </div>
     </div>
-    ${poster ? `<a class="hero-poster" href="#/anime/${attr(anime.id)}" aria-label="${attr(anime.title)}">
+    ${banner && poster ? `<a class="hero-poster" href="#/anime/${attr(anime.id)}" aria-label="${attr(anime.title)}">
       ${ui.posterInner(anime)}
     </a>` : ""}
   </article>`;
@@ -375,13 +378,6 @@ function heroCarouselHTML(releases) {
       <button class="hero-arrow next" type="button" data-hero-next aria-label="Следующий релиз">${ui.icon("chevron-right")}</button>
       <div class="hero-dots">${dots}</div>` : ""}
   </section>`;
-}
-
-function applyHeroBackgrounds() {
-  $$("#heroCarousel .hero-media").forEach((layer) => {
-    const url = layer.dataset.bg;
-    if (url) layer.style.setProperty("--hero-img", `url("${url}")`);
-  });
 }
 
 function clearHeroTimer() {
@@ -518,8 +514,80 @@ function rowHTML(title, list, opts = {}) {
     </div>
     ${opts.layout === "grid"
       ? `<div class="grid-cards">${list.map((a) => ui.cardHTML(a, opts)).join("")}</div>`
-      : `<div class="row-scroller">${list.map((a) => ui.cardHTML(a, opts)).join("")}</div>`}
+      : railHTML(list.map((a) => ui.cardHTML(a, opts)).join(""))}
   </section>`;
+}
+
+/* Горизонтальная лента карточек: перетаскивание мышью + стрелки */
+function railHTML(inner) {
+  return `<div class="rail" data-rail>
+    <button class="rail-arrow prev" type="button" data-rail-prev aria-label="Пролистать назад">${ui.icon("chevron-left")}</button>
+    <div class="row-scroller">${inner}</div>
+    <button class="rail-arrow next" type="button" data-rail-next aria-label="Пролистать вперёд">${ui.icon("chevron-right")}</button>
+  </div>`;
+}
+
+function initRails() {
+  $$("[data-rail]").forEach((rail) => {
+    const scroller = rail.querySelector(".row-scroller");
+    if (!scroller) return;
+    const prev = rail.querySelector("[data-rail-prev]");
+    const next = rail.querySelector("[data-rail-next]");
+
+    const update = () => {
+      const max = scroller.scrollWidth - scroller.clientWidth;
+      rail.classList.toggle("has-overflow", max > 8);
+      if (prev) prev.disabled = scroller.scrollLeft <= 4;
+      if (next) next.disabled = scroller.scrollLeft >= max - 4;
+    };
+
+    const step = (direction) => {
+      scroller.scrollBy({ left: direction * scroller.clientWidth * 0.86, behavior: "smooth" });
+    };
+    prev?.addEventListener("click", () => step(-1));
+    next?.addEventListener("click", () => step(1));
+
+    let down = false;
+    let startX = 0;
+    let startLeft = 0;
+    let moved = false;
+
+    scroller.addEventListener("pointerdown", (event) => {
+      if (event.pointerType === "touch" || event.button !== 0) return;
+      down = true;
+      moved = false;
+      startX = event.clientX;
+      startLeft = scroller.scrollLeft;
+    });
+
+    scroller.addEventListener("pointermove", (event) => {
+      if (!down) return;
+      const delta = event.clientX - startX;
+      if (!moved && Math.abs(delta) < 5) return;
+      moved = true;
+      scroller.classList.add("is-dragging");
+      scroller.scrollLeft = startLeft - delta;
+      event.preventDefault();
+    });
+
+    const endDrag = () => {
+      down = false;
+      scroller.classList.remove("is-dragging");
+    };
+    scroller.addEventListener("pointerup", endDrag);
+    scroller.addEventListener("pointercancel", endDrag);
+    scroller.addEventListener("pointerleave", endDrag);
+    scroller.addEventListener("click", (event) => {
+      if (!moved) return;
+      event.preventDefault();
+      event.stopPropagation();
+      moved = false;
+    }, true);
+
+    scroller.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", debounce(update, 150));
+    update();
+  });
 }
 
 function firstEpisodeForContinue(anime) {
@@ -580,12 +648,10 @@ function homeView() {
     ${settings().continueWatching && history.length
       ? `<section class="section">
           <div class="section-head"><h2>Продолжить просмотр</h2></div>
-          <div class="row-scroller">
-            ${history.map((h) => ui.cardHTML(h.anime, {
-              progress: h.progress,
-              href: `#/watch/${h.anime.id}/${h.episode.id}`,
-            })).join("")}
-          </div>
+          ${railHTML(history.map((h) => ui.cardHTML(h.anime, {
+            progress: h.progress,
+            href: `#/watch/${h.anime.id}/${h.episode.id}`,
+          })).join(""))}
         </section>`
       : ""}
     ${rowHTML("Новинки каталога", newest, { href: "#/catalog?sort=new" })}
@@ -604,7 +670,6 @@ function homeView() {
     </section>
   </div>`;
 
-  applyHeroBackgrounds();
   initHeroCarousel();
 
 }
@@ -789,8 +854,9 @@ function animeView(id) {
     .filter((a) => a.id !== anime.id && a.genres.some((g) => anime.genres.includes(g)))
     .slice(0, 8);
 
+  const heroBanner = safeUrl(anime.banner) || safeUrl(anime.poster);
   view.innerHTML = `<div class="anime-hero" id="animeHero">
-    <div class="anime-hero-bg"></div>
+    <div class="anime-hero-bg">${heroBanner ? `<img src="${attr(heroBanner)}" alt="" referrerpolicy="no-referrer" loading="lazy" decoding="async" draggable="false" onerror="this.remove()" />` : ""}</div>
     <div class="container">
       <div class="anime-layout">
         <div class="anime-poster" style="--h:${hueFrom(anime.title)}">${ui.posterInner(anime)}</div>
@@ -865,14 +931,10 @@ function animeView(id) {
 
       ${related.length ? `<section class="section">
         <div class="section-head"><h2>Похожее</h2><a class="link" href="#/catalog?genre=${encodeURIComponent(anime.genres[0] || "")}">Ещё ${ui.icon("chevron-right")}</a></div>
-        <div class="row-scroller">${related.map((a) => ui.cardHTML(a)).join("")}</div>
+        ${railHTML(related.map((a) => ui.cardHTML(a)).join(""))}
       </section>` : ""}
     </div>
   </div>`;
-
-  const heroBg = document.getElementById("animeHero")?.querySelector(".anime-hero-bg");
-  const banner = safeUrl(anime.banner) || safeUrl(anime.poster);
-  if (heroBg && banner) heroBg.style.setProperty("--banner", `url("${banner}")`);
 
   const toggle = document.getElementById("descToggle");
   const prose = document.querySelector("#animeDescription .prose");

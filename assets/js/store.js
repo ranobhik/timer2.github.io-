@@ -198,11 +198,21 @@ export async function loadCatalog() {
     base = null;
   }
 
-  let catalog = normalizeCatalog(base);
+  const fresh = normalizeCatalog(base);
+  let catalog = fresh;
 
   const draft = loadDraft();
   if (draft) {
     catalog = normalizeCatalog(draft.data);
+    // Постеры и баннеры могли появиться в data/catalog.json уже после сохранения
+    // черновика — подтягиваем их, чтобы правки в браузере не прятали новые картинки.
+    const freshById = new Map(fresh.anime.map((anime) => [anime.id, anime]));
+    catalog.anime.forEach((anime) => {
+      const shipped = freshById.get(anime.id);
+      if (!shipped) return;
+      if (!anime.banner && shipped.banner) anime.banner = shipped.banner;
+      if (!anime.poster && shipped.poster) anime.poster = shipped.poster;
+    });
     state.source = "draft";
     state.draftSavedAt = draft.savedAt || "";
   }

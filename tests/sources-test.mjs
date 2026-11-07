@@ -107,6 +107,15 @@ globalThis.fetch = async (url, opts = {}) => {
     const q = decodeURIComponent((u.match(/[?&]q=([^&]*)/) || [, ""])[1]);
     body = [[[`Перевод: ${q}`, q, null, null, 1]]]; status = 200;
   } else if (/api\.kinopoisk\.dev/.test(u)) { body = u.includes("/movie/search") ? { docs: [KP] } : KP; status = 200; }
+  if (u.includes("plapi.cdnvideohub.com") && u.includes("/playlist")) {
+    body = { titleName: "Аяка", isSerial: true, items: [
+      { cvhId: "aaa", vkId: "111", voiceStudio: "Рабочая партия", voiceType: "Дубляж", season: 1, episode: 1 },
+      { cvhId: "bbb", vkId: "222", voiceStudio: "Рабочая партия", voiceType: "Дубляж", season: 1, episode: 2 },
+      { cvhId: "ccc", vkId: "333", voiceStudio: "AniLibria", voiceType: "Многоголосый", season: 1, episode: 1 },
+    ] }; status = 200;
+  } else if (u.includes("plapi.cdnvideohub.com") && u.includes("/video/")) {
+    body = { duration: 1400, thumbUrl: "https://iv.okcdn.ru/p.jpg", sources: { mpegFullHdUrl: "", mpegHighUrl: "https://vd.okcdn.ru/720", hlsUrl: "https://vd.okcdn.ru/master.m3u8" } }; status = 200;
+  }
   return { ok: status === 200, status, json: async () => body };
 };
 
@@ -174,6 +183,23 @@ dom.window.localStorage.removeItem("rp.translate.v1");
 const map = await sources.translateTitles(["The Mask of the War God", "Маска дыма"]);
 check("Перевод на русский", map["The Mask of the War God"] === "Перевод: The Mask of the War God", JSON.stringify(map));
 check("Русское не переводим", map["Маска дыма"] === undefined, JSON.stringify(map));
+
+/* CVH */
+const cvh = await sources.cvhPlaylist({ id: "51019" });
+check("CVH: плейлист разобран", cvh.length === 3 && cvh[0].vkId === "111", String(cvh.length));
+const cvhStudios = sources.cvhStudios(cvh);
+check("CVH: список озвучек", cvhStudios.length === 2 && cvhStudios[0].studio === "Рабочая партия", JSON.stringify(cvhStudios));
+const dubItems = cvh.filter((item) => item.studio.toLowerCase().includes("рабочая партия"));
+check("CVH: только нужная озвучка", dubItems.length === 2 && dubItems.every((i) => i.studio === "Рабочая партия"), String(dubItems.length));
+const stream = await sources.cvhVideo({ vkId: "111" });
+check("CVH: ссылка на поток", stream.url === "https://vd.okcdn.ru/720", stream.url);
+check("CVH: ссылка плеера", sources.cvhPlayerUrl("111") === "cvh:111" && sources.cvhIdFromUrl("cvh:111") === "111");
+
+/* Ключи API хранятся в браузере */
+store.saveKeys({ kodikToken: "k", kinopoiskToken: "p", cvhToken: "c" });
+const storedKeys = store.getKeys();
+check("Ключи: сохранение", storedKeys.kodikToken === "k" && storedKeys.cvhToken === "c", JSON.stringify(storedKeys));
+check("Ключи: не в каталоге", !JSON.stringify(store.getCatalog()).includes('"cvhToken":"c"'));
 
 /* Секреты не уходят в публичный каталог */
 const exported = JSON.parse(store.exportJSON({ settings: { kodikToken: "secret", kinopoiskToken: "kp", title: "x" }, anime: [], genres: [] }));

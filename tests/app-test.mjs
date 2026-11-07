@@ -60,6 +60,10 @@ window.fetch = async (url, opts = {}) => {
   else if (/graphql\.anilist\.co/.test(u)) { body = { data: { Media: ANILIST_MEDIA, Page: { media: [ANILIST_MEDIA] } } }; status = 200; }
   else if (/api\.jikan\.moe\/v4\/anime\/61999\/episodes/.test(u)) { body = JIKAN_EPISODES; status = 200; }
   else if (/api\.jikan\.moe\/v4\/anime\/61999/.test(u)) { body = { data: { mal_id: 61999, title: "Shuiro no Kamen", episodes: 12 } }; status = 200; }
+  else if (u.includes("plapi.cdnvideohub.com")) {
+    body = { duration: 1400, sources: { mpegFullHdUrl: "https://vd.okcdn.ru/1080", mpegHighUrl: "https://vd.okcdn.ru/720" } };
+    status = 200;
+  }
   else if (/translate\.googleapis\.com/.test(u)) {
     const q = decodeURIComponent((u.match(/[?&]q=([^&]*)/) || [, ""])[1]);
     body = [[[`Перевод: ${q}`, q, null, null, 1]]];
@@ -131,6 +135,29 @@ window.location.hash = "#/admin/import";
 await wait(500);
 check("Панель синхронизации Kodik", Boolean(window.document.querySelector("#kodikSync")));
 check("Статус синхронизации", Boolean(window.document.querySelector("#kodikStatus")));
+
+/* CVH-плеер на публичной странице */
+const ui = await import(`${ROOT}/assets/js/ui.js`);
+const mount = window.document.createElement("div");
+window.document.body.append(mount);
+ui.mountPlayer(mount, { name: "CVH · Рабочая партия (Дубляж)", type: "cvh", url: "cvh:111" }, { anime: { title: "Проверка" } });
+await wait(400);
+check("CVH: плеер собран из ссылки на поток", Boolean(mount.querySelector("video")), mount.innerHTML.slice(0, 80));
+
+/* Настройки: ключи API */
+window.location.hash = "#/admin/settings";
+await wait(600);
+const doc = window.document;
+check("Настройки: поле токена Kodik", Boolean(doc.querySelector("#s-kodik")));
+check("Настройки: поля CVH", Boolean(doc.querySelector("#s-cvh-pub")) && Boolean(doc.querySelector("#s-cvh-aggr")));
+check("Настройки: кнопка проверки ключей", Boolean(doc.querySelector("#checkKeys")));
+doc.querySelector("#s-kodik").value = "test-kodik-key";
+doc.querySelector("#s-cvh-pub").value = "999";
+doc.querySelector("#settingsForm").dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+await wait(400);
+const store = await import(`${ROOT}/assets/js/store.js`);
+check("Ключ Kodik сохранён в браузере", store.getKeys().kodikToken === "test-kodik-key", JSON.stringify(store.getKeys()));
+check("Секретный ключ не попал в каталог", !Object.prototype.hasOwnProperty.call(store.getCatalog().settings, "kinopoiskToken") || !store.getCatalog().settings.kodikToken, JSON.stringify(store.getCatalog().settings?.kodikToken));
 
 console.log(`\n${pass}/${pass + fail} проверок пройдено`);
 if (fail) process.exit(1);

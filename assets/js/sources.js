@@ -43,8 +43,79 @@ const KIND_LABELS = {
   music: "Клип",
 };
 
+/* ---------- Кеш ответов API ----------
+   Повторный импорт того же тайтла (и повторный поиск) отдаётся из localStorage
+   за миллисекунды, без сети. */
+const API_CACHE_KEY = "rp.api-cache.v1";
+const API_CACHE_TTL = 1000 * 60 * 60 * 12;
+const API_CACHE_LIMIT = 90;
+const API_CACHE_MAX_BYTES = 150000;
+
+function storage() {
+  try {
+    return typeof window !== "undefined" ? window.localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+function readApiCache() {
+  const store = storage();
+  if (!store) return {};
+  try {
+    const parsed = JSON.parse(store.getItem(API_CACHE_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeApiCache(cache) {
+  const store = storage();
+  if (!store) return;
+  const keys = Object.keys(cache);
+  if (keys.length > API_CACHE_LIMIT) {
+    keys.sort((a, b) => (cache[a]?.at || 0) - (cache[b]?.at || 0));
+    keys.slice(0, keys.length - API_CACHE_LIMIT).forEach((key) => delete cache[key]);
+  }
+  try {
+    store.setItem(API_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    /* нет места — просто не кешируем */
+  }
+}
+
+function cacheKey(url, body) {
+  return `${url}${body ? `|${String(body).slice(0, 160)}` : ""}`;
+}
+
+function cacheRead(key) {
+  const entry = readApiCache()[key];
+  if (!entry || !entry.at) return null;
+  if (Date.now() - entry.at > API_CACHE_TTL) return null;
+  return entry.data ?? null;
+}
+
+function cacheWrite(key, data) {
+  let serialized;
+  try {
+    serialized = JSON.stringify(data);
+  } catch {
+    return;
+  }
+  if (!serialized || serialized.length > API_CACHE_MAX_BYTES) return;
+  const cache = readApiCache();
+  cache[key] = { at: Date.now(), data };
+  writeApiCache(cache);
+}
+
 /* ---------- HTTP ---------- */
-async function request(url, { method = "GET", headers = {}, body, timeout = 8000 } = {}) {
+async function request(url, { method = "GET", headers = {}, body, timeout = 8000, cache = true } = {}) {
+  const key = cache ? cacheKey(url, body) : "";
+  if (key) {
+    const cached = cacheRead(key);
+    if (cached) return cached;
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
   try {
@@ -58,7 +129,9 @@ async function request(url, { method = "GET", headers = {}, body, timeout = 8000
       const hint = res.status === 401 || res.status === 403 ? " (нужен/проверьте токен)" : "";
       throw new Error(`HTTP ${res.status}${hint}`);
     }
-    return await res.json();
+    const data = await res.json();
+    if (key) cacheWrite(key, data);
+    return data;
   } catch (error) {
     if (error?.name === "AbortError") throw new Error("Сервер не ответил вовремя");
     if (error instanceof TypeError) {
@@ -657,15 +730,16 @@ async function findShikimoriByTitles(queries, expected) {
  * Полный импорт по кандидату: тянет данные из источника, затем добирает
  * недостающее из Shikimori, AniList и Jikan (MyAnimeList) и склеивает всё в одну карточку.
  */
+export async function importBase(candidate, { kinopoiskToken = "" } = {}) {
+  if (!candidate) return null;
+  if (candidate.source === "shikimori") return getShikimori(candidate.sourceId);
+  if (candidate.source === "anilist") return getAniList(candidate.sourceId);
+  if (candidate.source === "kinopoisk") return getKinopoisk(candidate.sourceId, kinopoiskToken);
+  return null;
+}
+
 export async function importCandidate(candidate, { kinopoiskToken = "", withEpisodes = true } = {}) {
-  let anime = null;
-  if (candidate.source === "shikimori") {
-    anime = await getShikimori(candidate.sourceId);
-  } else if (candidate.source === "anilist") {
-    anime = await getAniList(candidate.sourceId);
-  } else if (candidate.source === "kinopoisk") {
-    anime = await getKinopoisk(candidate.sourceId, kinopoiskToken);
-  }
+  const anime = await importBase(candidate, { kinopoiskToken });
   if (!anime) throw new Error("Не удалось получить данные");
   return enrich(anime, { kinopoiskToken, withEpisodes, fallback: candidate });
 }

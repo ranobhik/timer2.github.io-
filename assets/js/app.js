@@ -729,10 +729,19 @@ function initHeaderScroll() {
     const y = window.scrollY || 0;
     header.classList.toggle("is-stuck", y > 6);
     const delta = y - last;
-    if (Math.abs(delta) < 8) return;
-    const navOpen = Boolean(document.querySelector(".header-inner.is-nav-open"));
-    header.classList.toggle("is-hidden", delta > 0 && y > 180 && !navOpen);
-    last = y;
+    if (Math.abs(delta) >= 8) {
+      const navOpen = Boolean(document.querySelector(".header-inner.is-nav-open"));
+      header.classList.toggle("is-hidden", delta > 0 && y > 180 && !navOpen);
+      last = y;
+    }
+    /* Пока шапка уехала, липкие элементы прижимаются к верху страницы. */
+    const offset = header.classList.contains("is-hidden")
+      ? "0px"
+      : `${Math.round(header.getBoundingClientRect().height)}px`;
+    const root = document.documentElement;
+    if (root.style.getPropertyValue("--header-offset") !== offset) {
+      root.style.setProperty("--header-offset", offset);
+    }
   };
 
   window.addEventListener("scroll", () => {

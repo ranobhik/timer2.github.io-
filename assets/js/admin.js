@@ -540,7 +540,18 @@ function editorHTML(anime, isNew) {
             <h2>Эпизоды и плееры</h2>
             <p>Каждый эпизод может иметь несколько плееров (озвучек) — зритель выберет нужный.</p>
           </div>
-          <button class="btn btn-soft btn-sm" type="button" id="addEpisode">${ui.icon("plus")} Эпизод</button>
+          <div class="field-row" style="gap:8px">
+            <button class="btn btn-ghost btn-sm" type="button" id="bulkEpisodeTitles">${ui.icon("edit")} Названия списком</button>
+            <button class="btn btn-soft btn-sm" type="button" id="addEpisode">${ui.icon("plus")} Эпизод</button>
+          </div>
+        </div>
+        <div class="panel" id="bulkTitles" hidden style="margin-bottom:14px;background:var(--surface-3)">
+          <label for="bulkTitlesInput" class="hint">Вставьте названия серий — по одному в строке, по порядку. Пустые строки пропускаются.</label>
+          <textarea id="bulkTitlesInput" rows="6" placeholder="Маска бога войны&#10;Маска дыма&#10;…" style="margin-top:8px"></textarea>
+          <div class="field-row" style="margin-top:10px">
+            <button class="btn btn-sm" type="button" id="bulkTitlesApply">${ui.icon("check")} Применить</button>
+            <button class="btn btn-ghost btn-sm" type="button" id="bulkTitlesCancel">Отмена</button>
+          </div>
         </div>
         <div class="ep-editor" id="episodeEditor">
           ${anime.episodes.map((ep, i) => episodeEditorHTML(ep, i)).join("") ||
@@ -813,7 +824,7 @@ function setField(name, value) {
   if (input && "value" in input) input.value = String(value);
 }
 
-function applyImportedFields(data) {
+function applyImportedFields(data, { episodes = true } = {}) {
   if (!data) return;
   if (data.shikimoriId) setField("shikimoriId", data.shikimoriId);
   setField("poster", data.poster);
@@ -848,11 +859,13 @@ function applyImportedFields(data) {
   });
 
   updatePosterPreview(data.poster || $("[name='poster']")?.value || "");
-  const episodeCount = applyImportedEpisodes(data);
+  const episodeCount = episodes ? applyImportedEpisodes(data) : 0;
   const statusEl = document.getElementById("editorStatus");
   if (statusEl) {
     const bits = ["Данные импортированы — не забудьте сохранить"];
     if (episodeCount) bits.push(`серий: ${episodeCount}`);
+    const titles = Array.isArray(data.episodeList) ? data.episodeList.filter((ep) => ep?.title).length : 0;
+    if (episodeCount && !titles) bits.push("названий серий в базах пока нет — впишите вручную");
     statusEl.textContent = bits.join(" · ");
   }
   const form = $("#animeForm");
@@ -1061,14 +1074,31 @@ async function handleQuickImport(btn, candidate = null) {
     btn.disabled = true;
     btn.innerHTML = "Ищу…";
   }
+  const kinopoiskToken = draftCatalog.settings.kinopoiskToken || "";
   try {
     if (editorModel) captureEditorValues();
-    const data = candidate
-      ? await sources.importCandidate(candidate, {
-        kinopoiskToken: draftCatalog.settings.kinopoiskToken || "",
-        withEpisodes: true,
-      })
-      : await importByValue(value, { withEpisodes: true });
+
+    /* Сначала мгновенно показываем данные выбранного источника (один запрос),
+       затем дополняем их остальными базами — так ожидание чувствуется короче. */
+    let base = null;
+    if (candidate) {
+      try {
+        base = await sources.importBase(candidate, { kinopoiskToken });
+        if (base) {
+          applyImportedFields({ ...base, poster: base.poster || candidate.poster || "" }, { episodes: false });
+          const statusEl = document.getElementById("editorStatus");
+          if (statusEl) statusEl.textContent = "Основные данные подставлены — уточняю из других баз…";
+        }
+      } catch (error) {
+        console.debug("importBase:", error?.message);
+      }
+    }
+
+    const data = base
+      ? await sources.enrich(base, { kinopoiskToken, withEpisodes: true, fallback: candidate })
+      : candidate
+        ? await sources.importCandidate(candidate, { kinopoiskToken, withEpisodes: true })
+        : await importByValue(value, { withEpisodes: true });
     applyImportedFields(data);
     if (input) input.value = "";
     ui.toast(importSummary(data), "ok");
@@ -1233,6 +1263,36 @@ function attachSuggest({ input, box, search, onPick, delay = 320 }) {
 function bindEditor(anime, isNew) {
   bindEpisodeControls();
   $("#addEpisode")?.addEventListener("click", addEpisode);
+
+  /* Массовая вставка названий серий: базы данных у новых тайтлов их ещё не знают. */
+  $("#bulkEpisodeTitles")?.addEventListener("click", () => {
+    const box = $("#bulkTitles");
+    if (!box) return;
+    box.hidden = !box.hidden;
+    if (!box.hidden) $("#bulkTitlesInput")?.focus();
+  });
+  $("#bulkTitlesCancel")?.addEventListener("click", () => {
+    const box = $("#bulkTitles");
+    if (box) box.hidden = true;
+  });
+  $("#bulkTitlesApply")?.addEventListener("click", () => {
+    const textarea = $("#bulkTitlesInput");
+    const lines = String(textarea?.value || "").split("\n").map((line) => line.trim()).filter(Boolean);
+    if (!lines.length) {
+      ui.toast("Вставьте названия — по одному в строке", "err");
+      return;
+    }
+    captureEditorValues();
+    if (!editorModel) return;
+    lines.forEach((title, index) => {
+      const episode = editorModel.episodes[index];
+      if (episode) episode.title = title;
+    });
+    renderEpisodesEditor();
+    const box = $("#bulkTitles");
+    if (box) box.hidden = true;
+    ui.toast(`Названия подставлены: ${Math.min(lines.length, editorModel.episodes.length)}`, "ok");
+  });
 
   $("#fetchPoster")?.addEventListener("click", (event) => handlePosterFetch(event.currentTarget));
   $("#quickImportBtn")?.addEventListener("click", (event) => handleQuickImport(event.currentTarget));

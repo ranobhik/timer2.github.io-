@@ -1320,10 +1320,9 @@ main { display: block; min-height: 60vh; padding-bottom: 40px; }
   border: 1px solid var(--line);
   border-radius: 99px;
   background: var(--surface);
-  position: sticky;
-  top: calc(var(--header-offset, var(--header-h)) + 8px);
-  z-index: 20;
-  backdrop-filter: blur(12px);
+  /* Не липнет: раньше плашка «уезжала» поверх полей и подрезала строки формы. */
+  position: relative;
+  z-index: 1;
 }
 .admin-tabs::-webkit-scrollbar { display: none; }
 .admin-tabs button {

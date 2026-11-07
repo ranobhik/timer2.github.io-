@@ -148,7 +148,13 @@ function contentTab() {
       </tr>`).join("")
     : `<tr><td colspan="7"><div class="empty" style="border:0;background:none">Пока нет ни одного аниме. Нажмите «Добавить аниме».</div></td></tr>`;
 
-  return `<div class="panel">
+  return `<div class="stack" style="--gap:14px">
+    <div class="notice">
+      ${ui.icon("info")}
+      <div><strong>Правки сохраняются локально в этом браузере.</strong> Чтобы их увидели посетители, выгрузите
+      <code>catalog.json</code> в разделе «Публикация и доступ» и замените файл <code>data/catalog.json</code> в репозитории.</div>
+    </div>
+    <div class="panel">
     <div class="panel-head">
       <div>
         <h2>Каталог · ${draftCatalog.anime.length}</h2>
@@ -167,6 +173,7 @@ function contentTab() {
         <tbody id="adminRows">${rowsHTML}</tbody>
       </table>
     </div>
+  </div>
   </div>`;
 }
 
@@ -811,8 +818,13 @@ function settingsTab() {
         ${settingsInput("logo", "Логотип", s.logo, "Ссылка на картинку, эмодзи или 1–2 символа. Пусто = звезда.")}
         ${settingsInput("footerText", "Текст в подвале", s.footerText)}
         <div class="field span-2">
-          <label for="s-description">Описание сайта</label>
+          <label for="s-description">Краткое описание сайта <small>для главной и мета-тегов</small></label>
           <textarea id="s-description" name="description" rows="3">${esc(s.description)}</textarea>
+        </div>
+        ${settingsInput("aboutTitle", "Заголовок страницы «О проекте»", s.aboutTitle)}
+        <div class="field span-2">
+          <label for="s-aboutText">Текст страницы «О проекте» <small>пусто — будет краткое описание</small></label>
+          <textarea id="s-aboutText" name="aboutText" rows="5">${esc(s.aboutText)}</textarea>
         </div>
       </div>
     </div>
@@ -955,6 +967,8 @@ function bindSettingsTab() {
       logo: get("logo").trim(),
       footerText: get("footerText").trim(),
       description: get("description").trim(),
+      aboutTitle: get("aboutTitle").trim() || "О проекте",
+      aboutText: get("aboutText").trim(),
       accent: get("accent") || "#f43f5e",
       accent2: get("accent2") || "#8b5cf6",
       theme: get("theme"),

@@ -861,28 +861,22 @@ function applyImportedFields(data) {
 
 function importedEpisodes(data) {
   const count = Math.min(200, Number(data.episodesCount) || 0);
+  const list = Array.isArray(data.episodeList) ? data.episodeList : [];
   const duration = data.duration ? `${data.duration} мин` : "24 мин";
-  if (Array.isArray(data.episodeList) && data.episodeList.length) {
-    return data.episodeList.slice(0, 120).map((ep, i) => ({
+  /* Серий столько, сколько их всего, а названия подставляем там, где они известны. */
+  const total = Math.min(120, Math.max(count, list.length));
+  if (!total) return [];
+  return Array.from({ length: total }, (_, index) => {
+    const imported = list.find((ep) => Number(ep.number) === index + 1);
+    return {
       id: uid("ep"),
-      number: Number(ep.number) || i + 1,
-      title: ep.title || "",
-      date: ep.date || "",
+      number: index + 1,
+      title: imported?.title || "",
+      date: imported?.date || "",
       duration,
       players: [],
-    }));
-  }
-  if (count > 0) {
-    return Array.from({ length: Math.min(60, count) }, (_, i) => ({
-      id: uid("ep"),
-      number: i + 1,
-      title: "",
-      date: "",
-      duration,
-      players: [],
-    }));
-  }
-  return [];
+    };
+  });
 }
 
 /** Перерисовывает блок «Эпизоды и плееры» из editorModel. */

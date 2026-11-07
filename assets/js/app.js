@@ -34,6 +34,7 @@ async function boot() {
   buildNav();
   bindGlobalUI();
   syncHeaderOffset();
+  initHeaderScroll();
 
   if (!location.hash) {
     history.replaceState(null, "", "#/");
@@ -599,14 +600,17 @@ function initHeroCarousel() {
 
 function rowHTML(title, list, opts = {}) {
   if (!list.length) return "";
+  /* href — это ссылка «Все» у заголовка ряда. Раньше она попадала и в карточки,
+     из-за чего клик по аниме открывал каталог. */
+  const { href, layout, ...cardOpts } = opts;
   return `<section class="section">
     <div class="section-head">
       <h2>${esc(title)}</h2>
-      ${opts.href ? `<a class="link" href="${attr(opts.href)}">Все ${ui.icon("chevron-right")}</a>` : ""}
+      ${href ? `<a class="link" href="${attr(href)}">Все ${ui.icon("chevron-right")}</a>` : ""}
     </div>
-    ${opts.layout === "grid"
-      ? `<div class="grid-cards">${list.map((a) => ui.cardHTML(a, opts)).join("")}</div>`
-      : railHTML(list.map((a) => ui.cardHTML(a, opts)).join(""))}
+    ${layout === "grid"
+      ? `<div class="grid-cards">${list.map((a) => ui.cardHTML(a, cardOpts)).join("")}</div>`
+      : railHTML(list.map((a) => ui.cardHTML(a, cardOpts)).join(""))}
   </section>`;
 }
 
@@ -655,28 +659,38 @@ function initRails() {
 
     scroller.addEventListener("dragstart", (event) => event.preventDefault());
 
+    /* Захват указателя берём только когда началось именно перетаскивание:
+       иначе клик по карточке уходил в скроллер и ссылка не срабатывала. */
     scroller.addEventListener("pointerdown", (event) => {
       if (event.pointerType === "touch" || (event.button !== undefined && event.button !== 0)) return;
       down = true;
       moved = false;
       startX = event.clientX;
       startLeft = scroller.scrollLeft;
-      try { scroller.setPointerCapture?.(event.pointerId); } catch { /* не критично */ }
     });
 
     scroller.addEventListener("pointermove", (event) => {
       if (!down) return;
       const delta = event.clientX - startX;
-      if (!moved && Math.abs(delta) < 5) return;
-      moved = true;
-      scroller.classList.add("is-dragging");
+      if (!moved && Math.abs(delta) < 6) return;
+      if (!moved) {
+        moved = true;
+        scroller.classList.add("is-dragging");
+        try { scroller.setPointerCapture?.(event.pointerId); } catch { /* не критично */ }
+      }
       scroller.scrollLeft = startLeft - delta;
       event.preventDefault();
     });
 
-    const endDrag = () => {
+    const endDrag = (event) => {
+      if (!down) return;
       down = false;
       scroller.classList.remove("is-dragging");
+      try {
+        if (event?.pointerId !== undefined && scroller.hasPointerCapture?.(event.pointerId)) {
+          scroller.releasePointerCapture(event.pointerId);
+        }
+      } catch { /* не критично */ }
     };
     scroller.addEventListener("pointerup", endDrag);
     scroller.addEventListener("pointercancel", endDrag);
@@ -700,6 +714,33 @@ function initRails() {
     window.addEventListener("resize", debounce(update, 150));
     update();
   });
+}
+
+/* Шапка уезжает при прокрутке вниз и возвращается при прокрутке вверх:
+   так блоки не «обрезаются» под липкой плашкой. */
+function initHeaderScroll() {
+  const header = document.getElementById("siteHeader");
+  if (!header) return;
+  let last = window.scrollY || 0;
+  let ticking = false;
+
+  const apply = () => {
+    ticking = false;
+    const y = window.scrollY || 0;
+    header.classList.toggle("is-stuck", y > 6);
+    const delta = y - last;
+    if (Math.abs(delta) < 8) return;
+    const navOpen = Boolean(document.querySelector(".header-inner.is-nav-open"));
+    header.classList.toggle("is-hidden", delta > 0 && y > 180 && !navOpen);
+    last = y;
+  };
+
+  window.addEventListener("scroll", () => {
+    if (ticking) return;
+    ticking = true;
+    (window.requestAnimationFrame || ((fn) => setTimeout(fn, 16)))(apply);
+  }, { passive: true });
+  apply();
 }
 
 function firstEpisodeForContinue(anime) {

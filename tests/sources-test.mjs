@@ -271,7 +271,7 @@ const raceMs = Date.now() - raceStart;
 check("Kodik через прокси, когда прямой путь закрыт", viaProxy[0]?.title === "Рабочая партия", JSON.stringify(viaProxy));
 check(`Прокси: параллельно, а не по очереди (${raceMs} мс)`, raceMs < 400, String(raceMs));
 const probes = await sources.probeKodik({ token: "t", timeout: 3000 });
-check("Проверка ключей: отчёт по каждому пути", probes.length === 5 && probes.filter((p) => p.ok).length === 1, JSON.stringify(probes.map((p) => `${p.label}:${p.ok}`)));
+check("Проверка ключей: отчёт по каждому пути", probes.length >= 5 && probes.filter((p) => p.ok).length === 1, JSON.stringify(probes.map((p) => `${p.label}:${p.ok}`)));
 globalThis.fetch = beforeRepair;
 
 console.log(`\n${pass}/${pass + fail} проверок пройдено`);

@@ -2,7 +2,7 @@
 
 import * as store from "./store.js";
 import * as ui from "./ui.js";
-import { applyCachedPosters, getShikimoriBatch, posterUrlById } from "./shikimori.js";
+import { applyCachedPosters, getAnimeDetails, getShikimoriBatch, posterUrlById } from "./shikimori.js";
 import * as sources from "./sources.js";
 import {
   $, $$, attr, debounce, esc, formatDate, hueFrom, matchesSearch, pluralEpisodes, safeUrl, statusLabel,
@@ -129,11 +129,7 @@ async function loadAutoCatalog(force = false) {
     if (cached) {
       autoStatus = "done";
       mergeAutoCatalog(cached, true);
-      attachCvhPlayers(cached).then((changed) => {
-        if (!changed) return;
-        writeAutoCache(cached);
-        patchAutoEntries(cached);
-      });
+      fillDetailsAndCvh(cached);
       return;
     }
   }
@@ -179,16 +175,12 @@ async function loadAutoCatalog(force = false) {
       render();
       return;
     }
-    /* постеры, описания, жанры и оценки — из Shikimori, MAL ID нужен для CVH */
-    await enrichAutoEntries(entries);
+    /* быстрый слой: названия, оценки, постеры; подробности и CVH — в фоне */
+    await applyShikimoriBatch(entries);
     writeAutoCache(entries);
     autoStatus = "done";
     mergeAutoCatalog(entries, true);
-    attachCvhPlayers(entries).then((changed) => {
-      if (!changed) return;
-      writeAutoCache(entries);
-      patchAutoEntries(entries);
-    });
+    fillDetailsAndCvh(entries);
   } catch (error) {
     autoError = error?.message || "Kodik недоступен";
     console.debug("Авто-каталог Kodik недоступен:", autoError);
@@ -205,10 +197,11 @@ async function loadAutoCatalog(force = false) {
   }
 }
 
-/* --- Обогащение авто-каталога: постеры, описание, жанры, оценка, MAL ID --- */
-const STATUS_MAP = { ongoing: "ongoing", released: "released", anons: "announced", anons_: "announced" };
+/* --- Обогащение авто-каталога --- */
+const STATUS_MAP = { ongoing: "ongoing", released: "released", anons: "announced" };
 
-async function enrichAutoEntries(entries) {
+/** Быстрый слой: один пакетный запрос к Shikimori — название, оценка, статус, постер. */
+async function applyShikimoriBatch(entries) {
   const ids = [...new Set(entries.map((entry) => entry.shikimoriId).filter(Boolean))];
   let map = {};
   if (ids.length) {
@@ -223,74 +216,107 @@ async function enrichAutoEntries(entries) {
     if (info) {
       entry.title = info.title || entry.title;
       entry.originalTitle = entry.originalTitle || info.originalTitle || "";
-      entry.description = info.description || "";
-      entry.genres = Array.isArray(info.genres) ? info.genres : [];
-      entry.rating = Number(info.rating) || 0;
+      entry.rating = Number(info.rating) || entry.rating || 0;
       entry.year = entry.year || info.year;
       entry.status = STATUS_MAP[info.status] || entry.status || "ongoing";
-      entry.malId = Number(info.malId) || entry.malId || 0;
-      entry.poster = info.poster || entry.poster;
+      if (info.poster) entry.poster = info.poster;
     }
-    if (!entry.poster && entry.shikimoriId) entry.poster = posterUrlById(entry.shikimoriId);
-    if (!entry.description) entry.description = "";
+    /* нет постера — берём кадр из серии Kodik, чтобы карточка не была пустой */
+    if (!entry.poster) entry.poster = entry.banner || "";
   });
   return entries;
 }
 
-/* --- CVH: подтягиваем плеер «Рабочей партии» к каждой серии --- */
-const CVH_WORKERS = 4;
+/**
+ * Медленный слой в фоне: подробности (описание, жанры, MAL ID) из Shikimori
+ * и плееры CVH для каждой серии. Результат кешируется, второй запуск мгновенный.
+ */
+let detailsRunning = false;
 
-function cvhPlayerFor(episode, studio) {
-  return {
-    name: `CVH · ${episode.studio || studio}`,
-    type: "cvh",
-    url: sources.cvhPlayerUrl(episode.vkId),
-    code: "",
-  };
-}
-
-async function attachCvhPlayers(entries) {
+async function fillDetailsAndCvh(entries) {
+  if (detailsRunning) return;
+  detailsRunning = true;
   const s = settings();
   const studio = String(s.cvhTranslation || "Рабочая партия").trim();
   const pub = String(s.cvhPub || "747").trim();
   const aggr = String(s.cvhAggr || "mali").trim();
   const proxy = String(s.corsProxy || "").trim();
-  const targets = entries.filter((entry) => {
-    if (!(entry.malId || entry.shikimoriId)) return false;
-    return !entry.episodes.some((episode) => (episode.players || []).some((player) => player.type === "cvh"));
-  });
-  if (!targets.length) return false;
+  const queue = [...entries];
+  let changed = 0;
+  let cvhTried = 0;
+  let cvhOk = 0;
+  let cvhError = "";
 
-  let index = 0;
-  let changed = false;
+  const attachCvh = (entry) => {
+    if (entry.episodes.some((episode) => (episode.players || []).some((player) => player.type === "cvh"))) return false;
+    return true;
+  };
+
   const worker = async () => {
-    while (index < targets.length) {
-      const entry = targets[index];
-      index += 1;
-      try {
-        const items = await sources.cvhPlaylist({ id: entry.malId || entry.shikimoriId, pub, aggr, proxy });
-        const found = sources.cvhEpisodes(items, { translation: studio });
-        found.forEach((episode) => {
-          const player = cvhPlayerFor(episode, studio);
-          const existing = entry.episodes.find((item) => item.number === episode.number);
-          if (existing) {
-            const players = Array.isArray(existing.players) ? existing.players : [];
-            if (players.some((item) => item.url === player.url)) return;
-            existing.players = [...players, player];
-            if (!existing.title && episode.title) existing.title = episode.title;
-          } else {
-            entry.episodes.push({ number: episode.number, title: episode.title || "", date: "", duration: "", players: [player] });
+    while (queue.length) {
+      const entry = queue.shift();
+      let touched = false;
+      if (!entry.description && entry.shikimoriId) {
+        try {
+          const info = await getAnimeDetails(entry.shikimoriId);
+          if (info) {
+            entry.description = info.description || "";
+            entry.genres = Array.isArray(info.genres) && info.genres.length ? info.genres : (entry.genres || []);
+            entry.rating = Number(info.rating) || entry.rating;
+            entry.malId = Number(info.malId) || entry.malId || 0;
+            entry.status = STATUS_MAP[info.status] || entry.status;
+            if (!entry.poster && info.poster) entry.poster = info.poster;
+            touched = true;
           }
-          changed = true;
-        });
-        entry.episodes.sort((a, b) => a.number - b.number);
-      } catch (error) {
-        console.debug("CVH для", entry.title, error?.message);
+        } catch (error) {
+          console.debug("Подробности Shikimori:", entry.shikimoriId, error?.message);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 350));
+      }
+      if (attachCvh(entry)) {
+        cvhTried += 1;
+        try {
+          const items = await sources.cvhPlaylist({ id: entry.malId || entry.shikimoriId, pub, aggr, proxy });
+          const found = sources.cvhEpisodes(items, { translation: studio });
+          found.forEach((episode) => {
+            const url = sources.cvhPlayerUrl(episode.vkId);
+            const player = { name: `CVH · ${episode.studio || studio}`, type: "cvh", url, code: "" };
+            const existing = entry.episodes.find((item) => item.number === episode.number);
+            if (existing) {
+              const players = Array.isArray(existing.players) ? existing.players : [];
+              if (players.some((item) => item.url === url)) return;
+              existing.players = [...players, player];
+              if (!existing.title && episode.title) existing.title = episode.title;
+            } else {
+              entry.episodes.push({ number: episode.number, title: episode.title || "", date: "", duration: "", players: [player] });
+            }
+            touched = true;
+          });
+          entry.episodes.sort((a, b) => a.number - b.number);
+          if (found.length) cvhOk += 1;
+        } catch (error) {
+          cvhError = error?.message || "ошибка";
+        }
+      }
+      if (touched) {
+        changed += 1;
+        if (changed % 6 === 0) patchAutoEntries(entries);
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(CVH_WORKERS, targets.length) }, worker));
-  return changed;
+
+  try {
+    await Promise.all(Array.from({ length: Math.min(2, queue.length) }, worker));
+  } finally {
+    detailsRunning = false;
+  }
+  if (changed) {
+    writeAutoCache(entries);
+    patchAutoEntries(entries);
+  }
+  if (cvhTried && !cvhOk) {
+    ui.toast(`Плееры CVH не добавлены: ${cvhError || "сервис не ответил"}`, "err");
+  }
 }
 
 /** Переносит свежие данные авто-каталога в текущий каталог (по id карточки). */
@@ -1316,12 +1342,36 @@ function catalogView(query) {
 /* =======================================================================
    Страница аниме
    ======================================================================= */
+/* Описание и жанры: если карточка пришла из Kodik без них — добираем по Shikimori ID */
+const detailsDone = new Set();
+
+function ensureDetailsForAnime(anime) {
+  if (!anime || detailsDone.has(anime.id)) return;
+  if (anime.description && (anime.genres || []).length) return;
+  if (!anime.shikimoriId) return;
+  detailsDone.add(anime.id);
+  getAnimeDetails(anime.shikimoriId).then((info) => {
+    if (!info) return;
+    anime.description = anime.description || info.description || "";
+    anime.genres = (anime.genres && anime.genres.length) ? anime.genres : (info.genres || []);
+    anime.rating = Number(anime.rating) || Number(info.rating) || 0;
+    anime.malId = Number(anime.malId) || Number(info.malId) || 0;
+    anime.status = STATUS_MAP[info.status] || anime.status;
+    if (!anime.poster && info.poster) anime.poster = info.poster;
+    render();
+  }).catch((error) => {
+    detailsDone.delete(anime.id);
+    console.debug("Описание Shikimori:", error?.message);
+  });
+}
+
 function animeView(id) {
   const anime = store.getAnime(id);
   if (!anime || (!anime.published && !store.isAdmin())) {
     notFoundView("Это аниме не найдено в каталоге.");
     return;
   }
+  ensureDetailsForAnime(anime);
   setTitle(anime.title);
 
   const episodes = store.animeEpisodes(anime);
@@ -1426,12 +1476,48 @@ function animeView(id) {
 /* =======================================================================
    Просмотр
    ======================================================================= */
+/* Один запрос к CVH на тайтл: если в серии ещё нет плеера CVH — подтягиваем и перерисовываем */
+const cvhDone = new Set();
+
+function ensureCvhForAnime(anime) {
+  if (!anime || cvhDone.has(anime.id)) return;
+  const hasCvh = (anime.episodes || []).some((episode) => (episode.players || []).some((player) => player.type === "cvh"));
+  if (hasCvh) return;
+  const s = settings();
+  if (!(anime.malId || anime.shikimoriId)) return;
+  cvhDone.add(anime.id);
+  const studio = String(s.cvhTranslation || "Рабочая партия").trim();
+  sources.cvhPlaylist({
+    id: anime.malId || anime.shikimoriId,
+    pub: String(s.cvhPub || "747").trim(),
+    aggr: String(s.cvhAggr || "mali").trim(),
+    proxy: String(s.corsProxy || "").trim(),
+  }).then((items) => {
+    const found = sources.cvhEpisodes(items, { translation: studio });
+    if (!found.length) return;
+    const episodes = store.animeEpisodes(anime);
+    found.forEach((episode) => {
+      const url = sources.cvhPlayerUrl(episode.vkId);
+      const target = episodes.find((item) => item.number === episode.number);
+      if (!target) return;
+      if ((target.players || []).some((player) => player.url === url)) return;
+      target.players = [...(target.players || []), { name: `CVH · ${episode.studio || studio}`, type: "cvh", url, code: "" }];
+      if (!target.title && episode.title) target.title = episode.title;
+    });
+    render();
+  }).catch((error) => {
+    cvhDone.delete(anime.id);
+    console.debug("CVH на странице серии:", error?.message);
+  });
+}
+
 function watchView(id, episodeKey) {
   const anime = store.getAnime(id);
   if (!anime) {
     notFoundView("Аниме не найдено.");
     return;
   }
+  ensureCvhForAnime(anime);
   const episodes = store.animeEpisodes(anime);
   if (!episodes.length) {
     setTitle(anime.title);

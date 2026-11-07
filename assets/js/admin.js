@@ -1423,12 +1423,14 @@ async function handleCheckKeys(btn) {
         }
       }
     }
-    try {
-      const items = await sources.cvhPlaylist({ id: "51019", pub: String(settings.cvhPub || "747").trim(), aggr: String(settings.cvhAggr || "mali").trim(), proxy });
-      const studios = sources.cvhStudios(items);
-      line(true, `CVH: ответ получен, серий ${items.length}, озвучек ${studios.length}`);
-    } catch (error) {
-      line(false, `CVH: ${error?.message || "ошибка запроса"}`);
+    const cvhProbes = await sources.probeCvh({
+      pub: String(settings.cvhPub || "747").trim(),
+      aggr: String(settings.cvhAggr || "mali").trim(),
+      proxy,
+    });
+    cvhProbes.forEach((probe) => line(probe.ok, `CVH ${probe.label}: ${probe.detail} (${probe.ms} мс)`));
+    if (!cvhProbes.some((probe) => probe.ok)) {
+      line(false, "CVH: ни один путь не работает — именно поэтому плееры CVH не добавляются");
     }
     if (!keys.kinopoiskToken) line(false, "Кинопоиск: токен не задан");
     else {

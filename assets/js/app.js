@@ -58,7 +58,7 @@ async function boot() {
    Авто-каталог Kodik: всё, что залито в плееры нужной озвучки,
    появляется на сайте само (кэш 6 часов, ничего не публикуется в git)
    ======================================================================= */
-const AUTO_KEY = "rp.auto.v5";
+const AUTO_KEY = "rp.auto.v6";
 const AUTO_TTL = 6 * 60 * 60 * 1000;
 let autoLoaded = false;
 /* idle | loading | done | empty | error | off — состояние авто-каталога */
@@ -236,6 +236,8 @@ async function applyShikimoriBatch(entries) {
       entry.rating = Number(info.rating) || entry.rating || 0;
       entry.year = entry.year || info.year;
       entry.status = STATUS_MAP[info.status] || entry.status || "ongoing";
+      entry.kind = entry.kind || info.kind || "";
+      entry.episodesAired = Number(info.episodesAired) || entry.episodesAired || 0;
       entry.totalEpisodes = Number(info.episodes) || Number(al?.episodes) || entry.totalEpisodes || 0;
       if (!entry.poster && info.poster) entry.poster = info.poster;
       if (Array.isArray(info.genres) && info.genres.length) entry.genres = info.genres;
@@ -289,6 +291,8 @@ async function fillDetailsAndCvh(entries) {
             entry.rating = Number(info.rating) || entry.rating;
             entry.malId = Number(info.malId) || entry.malId || 0;
             entry.status = STATUS_MAP[info.status] || entry.status;
+            entry.kind = entry.kind || info.kind || "";
+            entry.episodesAired = Number(info.episodesAired) || entry.episodesAired || 0;
             entry.totalEpisodes = Number(info.episodes) || entry.totalEpisodes || 0;
             if (!entry.poster && info.poster) entry.poster = info.poster;
             touched = true;

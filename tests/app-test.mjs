@@ -210,6 +210,20 @@ check(
   storeMod.isAbandoned({ episodes: [{}], totalEpisodes: 12, sourceUpdatedAt: "2026-10-20T10:00:00Z" }, Date.parse("2026-11-07T00:00:00Z")) === false,
 );
 check(
+  "Завершённый тайтл: 1 серия из 12 вышедших и тишина — скрыт",
+  storeMod.isAbandoned(
+    { status: "released", kind: "ТВ", episodes: [{}], episodesAired: 12, totalEpisodes: 0, sourceUpdatedAt: "2025-06-01T10:00:00Z" },
+    Date.parse("2026-11-07T00:00:00Z"),
+  ) === true,
+);
+check(
+  "Догнали вышедшие серии — оставляем",
+  storeMod.isAbandoned(
+    { status: "ongoing", kind: "ТВ", episodes: new Array(6).fill({}), episodesAired: 6, totalEpisodes: 12, sourceUpdatedAt: "2026-09-01T10:00:00Z" },
+    Date.parse("2026-11-07T00:00:00Z"),
+  ) === false,
+);
+check(
   "Без известного числа серий не скрываем",
   storeMod.isAbandoned({ episodes: [{}], totalEpisodes: 0, sourceUpdatedAt: "2020-01-01T10:00:00Z" }, Date.parse("2026-11-07T00:00:00Z")) === false,
 );

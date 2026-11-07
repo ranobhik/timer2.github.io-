@@ -1,0 +1,14 @@
+== kodik translations
+HTTP 000
+
+== kodik search 61999
+HTTP 000
+
+== kodik list
+HTTP 000
+
+== jikan episodes
+HTTP 000
+
+== anilist
+{"data":{"Media":{"episodes":null,"streamingEpisodes":[]}}}

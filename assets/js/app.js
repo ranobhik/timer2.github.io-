@@ -2,6 +2,7 @@
 
 import * as store from "./store.js";
 import * as ui from "./ui.js";
+import { applyCachedPosters } from "./shikimori.js";
 import {
   $, $$, attr, debounce, esc, formatDate, hueFrom, pluralEpisodes, safeUrl, statusLabel,
 } from "./utils.js";
@@ -19,12 +20,15 @@ let catalog = null;
 let prefs = null;
 let searchHandler = null;
 let lastRenderedPath = "";
+let heroTimer = null;
+let heroController = null;
 
 /* =======================================================================
    Инициализация
    ======================================================================= */
 async function boot() {
   catalog = await store.loadCatalog();
+  applyCachedPosters(catalog);
   prefs = store.getPrefs();
   applySettings();
   buildNav();
@@ -165,6 +169,12 @@ function bindGlobalUI() {
     if (meta) meta.content = next === "light" ? "#f6f7fb" : "#07070c";
   });
 
+  document.addEventListener("visibilitychange", () => {
+    if (!heroController) return;
+    if (document.hidden) heroController.stop();
+    else heroController.start();
+  });
+
   window.addEventListener("load", syncHeaderOffset);
   if (document.fonts?.ready) document.fonts.ready.then(syncHeaderOffset).catch(() => {});
   window.addEventListener("resize", debounce(syncHeaderOffset, 150));
@@ -273,6 +283,7 @@ async function render() {
   const segments = path.split("/").filter(Boolean);
 
   searchHandler = null;
+  clearHeroTimer();
   markActiveNav(path);
   view.innerHTML = "";
   const scrollTop = lastRenderedPath !== path;
@@ -309,14 +320,32 @@ async function render() {
 /* =======================================================================
    Главная
    ======================================================================= */
-function heroHTML(anime) {
+function pickReleases(list) {
+  const featured = list.filter((anime) => anime.featured);
+  const newest = [...list].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const pool = [...featured, ...newest, ...list];
+  const seen = new Set();
+  const releases = [];
+  pool.forEach((anime) => {
+    if (seen.has(anime.id) || releases.length >= 6) return;
+    seen.add(anime.id);
+    releases.push({ anime, label: anime.featured ? "Выбор партии" : "Новый релиз" });
+  });
+  return releases;
+}
+
+function heroSlideHTML({ anime, label }, index) {
   const episode = firstEpisodeForContinue(anime);
   const watch = episode ? store.watchHref(anime, episode) : `#/anime/${anime.id}`;
-  return `<section class="hero" id="hero" style="--h:${hueFrom(anime.title)}">
-    <div class="hero-bg"></div>
-    <div class="hero-inner">
-      <span class="eyebrow">Выбор партии</span>
-      <h1 class="hero-title">${esc(anime.title)}</h1>
+  const banner = safeUrl(anime.banner);
+  const poster = safeUrl(anime.poster);
+  const bgClass = banner ? "" : poster ? "is-poster" : "";
+  const bgUrl = (banner || poster).replace(/"/g, "%22");
+  return `<article class="hero-slide" data-slide="${index}" aria-hidden="${index !== 0}">
+    <div class="hero-slide-bg ${bgClass}" style="--h:${hueFrom(anime.title)}" data-bg="${attr(bgUrl)}"></div>
+    <div class="hero-content">
+      <span class="eyebrow">${esc(label)}</span>
+      <h2 class="hero-title"><a href="#/anime/${attr(anime.id)}">${esc(anime.title)}</a></h2>
       <div class="hero-meta">${ui.metaChips(anime)}</div>
       <p class="hero-sub">${esc(anime.description || "Описание пока не добавлено.")}</p>
       <div class="hero-actions">
@@ -324,12 +353,103 @@ function heroHTML(anime) {
         <a class="btn btn-ghost" href="#/anime/${attr(anime.id)}">О сериале</a>
       </div>
     </div>
-    <div class="hero-poster">
-      <a href="#/anime/${attr(anime.id)}" aria-label="${attr(anime.title)}">
-        ${ui.posterInner(anime)}
-      </a>
-    </div>
+    <a class="hero-poster" href="#/anime/${attr(anime.id)}" aria-label="${attr(anime.title)}">
+      ${ui.posterInner(anime)}
+    </a>
+  </article>`;
+}
+
+function heroCarouselHTML(releases) {
+  if (!releases.length) return "";
+  const slides = releases.map(heroSlideHTML).join("");
+  const dots = releases
+    .map(({ anime }, i) => `<button class="hero-dot" type="button" data-hero-dot="${i}" aria-label="Релиз ${i + 1}: ${attr(anime.title)}" aria-current="${i === 0}"></button>`)
+    .join("");
+  return `<section class="hero-carousel${releases.length < 2 ? " is-single" : ""}" id="heroCarousel" aria-roledescription="карусель" aria-label="Релизы">
+    <div class="hero-track">${slides}</div>
+    ${releases.length > 1 ? `
+      <button class="hero-arrow prev" type="button" data-hero-prev aria-label="Предыдущий релиз">${ui.icon("chevron-left")}</button>
+      <button class="hero-arrow next" type="button" data-hero-next aria-label="Следующий релиз">${ui.icon("chevron-right")}</button>
+      <div class="hero-dots">${dots}</div>` : ""}
   </section>`;
+}
+
+function applyHeroBackgrounds() {
+  $$("#heroCarousel .hero-slide-bg").forEach((layer) => {
+    const url = layer.dataset.bg;
+    if (url) layer.style.setProperty("--hero-img", `url("${url}")`);
+  });
+}
+
+function clearHeroTimer() {
+  if (heroTimer) {
+    clearInterval(heroTimer);
+    heroTimer = null;
+  }
+  heroController = null;
+}
+
+function initHeroCarousel() {
+  clearHeroTimer();
+  const root = document.getElementById("heroCarousel");
+  if (!root) return;
+  const track = root.querySelector(".hero-track");
+  const slides = $$(".hero-slide", root);
+  const dots = $$("[data-hero-dot]", root);
+  if (!track || slides.length < 2) return;
+
+  let index = 0;
+  const go = (next) => {
+    index = (next + slides.length) % slides.length;
+    track.style.transform = `translateX(-${index * 100}%)`;
+    slides.forEach((slide, i) => {
+      const active = i === index;
+      slide.setAttribute("aria-hidden", String(!active));
+      if ("inert" in slide) slide.inert = !active;
+    });
+    dots.forEach((dot, i) => dot.setAttribute("aria-current", String(i === index)));
+  };
+
+  const reduceMotion = Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
+  const stop = () => clearHeroTimer();
+  const start = () => {
+    stop();
+    if (reduceMotion || document.hidden) return;
+    heroTimer = setInterval(() => go(index + 1), 7000);
+  };
+  const restart = () => { stop(); start(); };
+
+  root.querySelector("[data-hero-prev]")?.addEventListener("click", () => { go(index - 1); restart(); });
+  root.querySelector("[data-hero-next]")?.addEventListener("click", () => { go(index + 1); restart(); });
+  dots.forEach((dot) => dot.addEventListener("click", () => { go(Number(dot.dataset.heroDot)); restart(); }));
+
+  root.addEventListener("pointerenter", stop);
+  root.addEventListener("pointerleave", start);
+  root.addEventListener("focusin", stop);
+  root.addEventListener("focusout", start);
+
+  let startX = null;
+  root.addEventListener("pointerdown", (event) => {
+    if (event.target.closest("a, button")) return;
+    startX = event.clientX;
+  });
+  root.addEventListener("pointerup", (event) => {
+    if (startX === null) return;
+    const delta = event.clientX - startX;
+    startX = null;
+    if (Math.abs(delta) > 45) {
+      go(index + (delta < 0 ? 1 : -1));
+      restart();
+    }
+  });
+  root.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowLeft") { go(index - 1); restart(); }
+    if (event.key === "ArrowRight") { go(index + 1); restart(); }
+  });
+
+  go(0);
+  start();
+  heroController = { start, stop };
 }
 
 function rowHTML(title, list, opts = {}) {
@@ -354,17 +474,6 @@ function firstEpisodeForContinue(anime) {
   return store.animeEpisodes(anime)[0] || null;
 }
 
-function pickFeatured(list) {
-  const s = settings();
-  if (!list.length) return null;
-  if (s.heroMode === "newest") {
-    return [...list].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
-  }
-  const featured = list.filter((a) => a.featured);
-  const pool = featured.length ? featured : list;
-  return [...pool].sort((a, b) => b.rating - a.rating)[0];
-}
-
 function homeView() {
   const published = store.publicAnime();
   setTitle("");
@@ -386,7 +495,7 @@ function homeView() {
     return;
   }
 
-  const featured = pickFeatured(published);
+  const releases = pickReleases(published);
   const history = store.getPrefs().history
     .map((item) => {
       const anime = published.find((a) => a.id === item.animeId);
@@ -410,7 +519,7 @@ function homeView() {
     }));
 
   view.innerHTML = `<div class="container">
-    ${heroHTML(featured)}
+    ${heroCarouselHTML(releases)}
     ${settings().continueWatching && history.length
       ? `<section class="section">
           <div class="section-head"><h2>Продолжить просмотр</h2></div>
@@ -438,9 +547,8 @@ function homeView() {
     </section>
   </div>`;
 
-  const hero = document.getElementById("hero");
-  const banner = safeUrl(featured.banner);
-  if (hero && banner) hero.style.setProperty("--hero-img", `url("${banner}")`);
+  applyHeroBackgrounds();
+  initHeroCarousel();
 
 }
 

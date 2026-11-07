@@ -141,6 +141,7 @@ export function normalizeAnime(raw, index = 0) {
     description: String(item.description || ""),
     poster: String(item.poster || ""),
     banner: String(item.banner || ""),
+    shikimoriId: String(item.shikimoriId || ""),
     studio: String(item.studio || ""),
     director: String(item.director || ""),
     country: String(item.country || "Япония"),

@@ -14,7 +14,8 @@ export function posterInner(anime, label = "Рабочая партия") {
       <span>${esc(initials(anime.title))}</span><small>${esc(label)}</small>
     </div>`;
   if (!src) return fallback;
-  return `${fallback}<img src="${attr(src)}" alt="Постер «${attr(anime.title)}»" loading="lazy" decoding="async" style="position:absolute;inset:0;z-index:1" onerror="this.remove()" />`;
+  const onerror = "if(!this.dataset.png){this.dataset.png='1';this.src=this.src.replace(/\\.jpg(\\?|$)/,'.png');}else{this.remove();}";
+  return `${fallback}<img src="${attr(src)}" alt="Постер «${attr(anime.title)}»" loading="lazy" decoding="async" referrerpolicy="no-referrer" style="position:absolute;inset:0;z-index:1" onerror="${onerror}" />`;
 }
 
 /* ---------- Карточка аниме ---------- */

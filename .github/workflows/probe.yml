@@ -1,49 +1,20 @@
 name: probe
 on:
   push:
-    paths:
-      - ".github/workflows/probe.yml"
+    branches: ['arena/**']
+    paths: ['.github/workflows/probe.yml']
   workflow_dispatch:
-
 jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Kodik translations
-        run: |
-          curl -s -m 30 -H "Origin: https://ranobhik.github.io" -H "Referer: https://ranobhik.github.io/" \
-            "https://kodikapi.com/translations?token=${{ secrets.KODIK_TOKEN || 'd6a9c41c60eae7abeb43f91ea50e2302' }}&limit=500" -o t.json -w "HTTP %{http_code}\n"
-          head -c 300 t.json; echo
-          python3 -c "
-import json
-d=json.load(open('t.json'))
-if 'results' in d:
-    rs=d['results']
-    print('translations:', len(rs))
-    print([r for r in rs if 'артия' in r.get('title','') or 'абоч' in r.get('title','')])
-else:
-    print(d)
-"
-      - name: Kodik search by shikimori id
-        run: |
-          curl -s -m 30 -H "Origin: https://ranobhik.github.io" -H "Referer: https://ranobhik.github.io/" \
-            "https://kodikapi.com/search?token=${{ secrets.KODIK_TOKEN || 'd6a9c41c60eae7abeb43f91ea50e2302' }}&shikimori_id=61999&with_episodes=true&with_seasons=true" -o s.json -w "HTTP %{http_code}\n"
-          head -c 800 s.json; echo
-      - name: Jikan episodes 61999
-        run: |
-          curl -s -m 30 "https://api.jikan.moe/v4/anime/61999/episodes" -o j.json -w "HTTP %{http_code}\n"
-          head -c 600 j.json; echo
-          sleep 2
-      - name: Jikan anime 61999
-        run: |
-          curl -s -m 30 "https://api.jikan.moe/v4/anime/61999" -o j2.json -w "HTTP %{http_code}\n"
-          python3 -c "
-import json
-d=json.load(open('j2.json'))
-x=d.get('data',{})
-print({k:x.get(k) for k in ('title','title_english','episodes','status','aired')})
-"
-      - name: AniList streaming episodes
-        run: |
-          curl -s -m 30 -X POST https://graphql.anilist.co -H 'Content-Type: application/json' \
-            -d '{"query":"query{Media(idMal:61999,type:ANIME){id episodes streamingEpisodes{title}}}}"' | head -c 800; echo
+      - name: kodik-translations
+        run: curl -s -m 30 -H 'Referer: https://ranobhik.github.io/' "https://kodikapi.com/translations?token=d6a9c41c60eae7abeb43f91ea50e2302&limit=500" -o t.json -w 'HTTP %{http_code}\n'; head -c 200 t.json; echo; python3 -c "import json;d=json.load(open('t.json'));r=d.get('results');print('count',len(r) if r else d);print([x for x in (r or []) if 'артия' in x.get('title','')])"
+      - name: kodik-search
+        run: curl -s -m 30 -H 'Referer: https://ranobhik.github.io/' "https://kodikapi.com/search?token=d6a9c41c60eae7abeb43f91ea50e2302&shikimori_id=61999&with_episodes=true&with_seasons=true" -o s.json -w 'HTTP %{http_code}\n'; head -c 700 s.json; echo
+      - name: jikan-episodes
+        run: curl -s -m 30 "https://api.jikan.moe/v4/anime/61999/episodes" -o j.json -w 'HTTP %{http_code}\n'; head -c 500 j.json; echo
+      - name: jikan-anime
+        run: curl -s -m 30 "https://api.jikan.moe/v4/anime/61999" -o j2.json -w 'HTTP %{http_code}\n'; python3 -c "import json;x=json.load(open('j2.json')).get('data',{});print(x.get('title'),x.get('episodes'),x.get('aired',{}).get('from'))"
+      - name: anilist
+        run: curl -s -m 30 -X POST https://graphql.anilist.co -H 'Content-Type: application/json' -d '{"query":"query{Media(idMal:61999,type:ANIME){episodes streamingEpisodes{title}}}"}'; echo

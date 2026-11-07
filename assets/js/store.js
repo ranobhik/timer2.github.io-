@@ -166,6 +166,8 @@ export function normalizeAnime(raw, index = 0) {
     featured: item.featured === true,
     createdAt: String(item.createdAt || new Date().toISOString()),
     totalEpisodes: Number(item.totalEpisodes) || 0,
+    sourceUpdatedAt: String(item.sourceUpdatedAt || ""),
+    uploadedAt: String(item.uploadedAt || ""),
     episodes,
   };
 }
@@ -486,8 +488,26 @@ export function getAnime(id) {
   return state.catalog.anime.find((item) => item.id === id) || null;
 }
 
+/* Сколько дней без новых серий считаем «заброшено» */
+export const ABANDON_DAYS = 90;
+
+/**
+ * Заброшенная озвучка: вышли не все серии, и давно ничего не заливали.
+ * Нужен известный общий счётчик серий — иначе не угадываем и тайтл оставляем.
+ */
+export function isAbandoned(anime, now = Date.now(), days = ABANDON_DAYS) {
+  const total = Number(anime?.totalEpisodes) || 0;
+  if (!total) return false;
+  const have = (anime?.episodes || []).length;
+  if (have >= total) return false;
+  const stamp = Date.parse(String(anime?.sourceUpdatedAt || "").trim().replace(" ", "T"));
+  if (!Number.isFinite(stamp)) return false;
+  return now - stamp > days * 86400000;
+}
+
 export function publicAnime() {
-  return (state.catalog?.anime || []).filter((item) => item.published);
+  const now = Date.now();
+  return (state.catalog?.anime || []).filter((item) => item.published && !isAbandoned(item, now));
 }
 
 export function animeEpisodes(anime) {

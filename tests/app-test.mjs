@@ -197,6 +197,22 @@ const mount = window.document.createElement("div");
 window.document.body.append(mount);
 ui.mountPlayer(mount, { name: "CVH · Рабочая партия (Дубляж)", type: "cvh", url: "cvh:111" }, { anime: { title: "Проверка" } });
 await wait(400);
+check(
+  "Заброшенная озвучка скрыта (1 серия из 12, обновлений нет с 2025)",
+  storeMod.isAbandoned({ episodes: [{}], totalEpisodes: 12, sourceUpdatedAt: "2025-02-01T10:00:00Z" }, Date.parse("2026-11-07T00:00:00Z")) === true,
+);
+check(
+  "Полная озвучка остаётся даже старая",
+  storeMod.isAbandoned({ episodes: new Array(12).fill({}), totalEpisodes: 12, sourceUpdatedAt: "2024-01-01T10:00:00Z" }, Date.parse("2026-11-07T00:00:00Z")) === false,
+);
+check(
+  "Незаконченная, но свежая озвучка остаётся",
+  storeMod.isAbandoned({ episodes: [{}], totalEpisodes: 12, sourceUpdatedAt: "2026-10-20T10:00:00Z" }, Date.parse("2026-11-07T00:00:00Z")) === false,
+);
+check(
+  "Без известного числа серий не скрываем",
+  storeMod.isAbandoned({ episodes: [{}], totalEpisodes: 0, sourceUpdatedAt: "2020-01-01T10:00:00Z" }, Date.parse("2026-11-07T00:00:00Z")) === false,
+);
 check("CVH: плеер собран из ссылки на поток", Boolean(mount.querySelector("video")), mount.innerHTML.slice(0, 80));
 check("CVH: есть выбор качества", Boolean(mount.querySelector(".cvh-quality")), mount.innerHTML.slice(0, 120));
 check("CVH: есть выбор скорости", mount.querySelectorAll(".cvh-speed button").length === 6, String(mount.querySelectorAll(".cvh-speed button").length));

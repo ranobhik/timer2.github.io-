@@ -1477,31 +1477,22 @@ export function kodikMatchesTranslation(item, filter) {
  * Превращает элементы Kodik в карточки, пригодные для каталога:
  * серия = плеер этой озвучки. Постер берётся с Shikimori по его ID.
  */
-/* Свежесть озвучки: материал должен быть загружен на Kodik не раньше этой даты.
-   Год выхода аниме не используем — старые тайтлы, озвученные позже, остаются в каталоге. */
-export const KODIK_FRESH_SINCE = "2025-01-01";
-
-function kodikUploadedAt(item = {}) {
-  const raw = item.created_at || item.createdAt || item.updated_at || item.updatedAt || "";
-  const time = Date.parse(String(raw).trim().replace(" ", "T"));
-  return Number.isFinite(time) ? time : 0;
+/* Даты материала нужны, чтобы отличать живую озвучку от заброшенной */
+function kodikDate(item = {}, ...keys) {
+  for (const key of keys) {
+    const raw = String(item[key] || "").trim();
+    const time = Date.parse(raw.replace(" ", "T"));
+    if (Number.isFinite(time)) return new Date(time).toISOString();
+  }
+  return "";
 }
 
-function isFreshUpload(item, since = KODIK_FRESH_SINCE) {
-  const cutoff = Date.parse(`${since}T00:00:00`);
-  if (!Number.isFinite(cutoff)) return true;
-  const uploaded = kodikUploadedAt(item);
-  /* даты нет — не выкидываем тайтл из каталога */
-  return uploaded ? uploaded >= cutoff : true;
-}
-
-export function kodikCatalogEntries(items = [], { translation = "Рабочая партия", limit = 300, freshSince = KODIK_FRESH_SINCE } = {}) {
+export function kodikCatalogEntries(items = [], { translation = "Рабочая партия", limit = 300 } = {}) {
   const entries = [];
   const seen = new Set();
   items.forEach((item) => {
     if (entries.length >= limit) return;
     if (!kodikMatchesTranslation(item, translation)) return;
-    if (!isFreshUpload(item, freshSince)) return;
     const episodes = Array.isArray(item.episodes) && item.episodes.length ? item.episodes : kodikEpisodes(item);
     if (!episodes.length) return;
     const title = String(item.title || item.title_orig || "").trim();
@@ -1522,6 +1513,8 @@ export function kodikCatalogEntries(items = [], { translation = "Рабочая 
       /* кадр из серии — запасная «обложка», если постера нет */
       banner: Array.isArray(item.screenshots) && item.screenshots.length ? String(item.screenshots[0]) : "",
       episodesCount: episodes.length,
+      uploadedAt: kodikDate(item, "created_at", "createdAt"),
+      sourceUpdatedAt: kodikDate(item, "updated_at", "updatedAt", "created_at", "createdAt"),
       episodes: episodes.map((episode) => ({
         number: episode.number,
         title: "",

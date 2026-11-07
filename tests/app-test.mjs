@@ -69,10 +69,10 @@ window.fetch = async (url, opts = {}) => {
     body = [[[`Перевод: ${q}`, q, null, null, 1]]];
     status = 200;
   }
-  else if (u.includes("kodikapi.com/translations")) {
+  else if (u.includes("kodik-api.com/translations")) {
     body = { results: [{ id: 777, title: "Рабочая партия", type: "voice" }] }; status = 200;
   }
-  else if (u.includes("kodikapi.com/list")) {
+  else if (u.includes("kodik-api.com/list")) {
     body = { results: [{
       id: "serial-777", type: "anime-serial", title: "Новинка озвучки", title_orig: "New Dub Title", year: 2026,
       translation: { id: 777, title: "Рабочая партия", type: "voice" },
@@ -80,7 +80,7 @@ window.fetch = async (url, opts = {}) => {
       seasons: { 1: { episodes: { 1: { link: "//kodik.info/seria/1/a/720p" }, 2: { link: "//kodik.info/seria/2/b/720p" } } } },
     }], next_page: "" }; status = 200;
   }
-  else if (u.includes("kodikapi.com/search")) {
+  else if (u.includes("kodik-api.com/search")) {
     body = { results: [{
       id: "serial-777", type: "anime-serial", title: "Новинка озвучки", year: 2026,
       translation: { id: 777, title: "Рабочая партия", type: "voice" },

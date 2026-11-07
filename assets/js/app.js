@@ -2,7 +2,7 @@
 
 import * as store from "./store.js";
 import * as ui from "./ui.js";
-import { applyCachedPosters } from "./shikimori.js";
+import { applyCachedPosters, getShikimoriBatch, posterUrlById } from "./shikimori.js";
 import * as sources from "./sources.js";
 import {
   $, $$, attr, debounce, esc, formatDate, hueFrom, matchesSearch, pluralEpisodes, safeUrl, statusLabel,
@@ -57,7 +57,7 @@ async function boot() {
    Авто-каталог Kodik: всё, что залито в плееры нужной озвучки,
    появляется на сайте само (кэш 6 часов, ничего не публикуется в git)
    ======================================================================= */
-const AUTO_KEY = "rp.auto.v1";
+const AUTO_KEY = "rp.auto.v2";
 const AUTO_TTL = 6 * 60 * 60 * 1000;
 let autoLoaded = false;
 /* idle | loading | done | empty | error | off — состояние авто-каталога */
@@ -129,6 +129,11 @@ async function loadAutoCatalog(force = false) {
     if (cached) {
       autoStatus = "done";
       mergeAutoCatalog(cached, true);
+      attachCvhPlayers(cached).then((changed) => {
+        if (!changed) return;
+        writeAutoCache(cached);
+        patchAutoEntries(cached);
+      });
       return;
     }
   }
@@ -168,15 +173,22 @@ async function loadAutoCatalog(force = false) {
       }
     }
     const entries = sources.kodikCatalogEntries(items, { translation: voice.title });
-    writeAutoCache(entries);
     if (!entries.length) {
       autoStatus = "empty";
       autoError = `В озвучке «${voice.title}» пока нет тайтлов с сериями`;
       render();
       return;
     }
+    /* постеры, описания, жанры и оценки — из Shikimori, MAL ID нужен для CVH */
+    await enrichAutoEntries(entries);
+    writeAutoCache(entries);
     autoStatus = "done";
     mergeAutoCatalog(entries, true);
+    attachCvhPlayers(entries).then((changed) => {
+      if (!changed) return;
+      writeAutoCache(entries);
+      patchAutoEntries(entries);
+    });
   } catch (error) {
     autoError = error?.message || "Kodik недоступен";
     console.debug("Авто-каталог Kodik недоступен:", autoError);
@@ -191,6 +203,112 @@ async function loadAutoCatalog(force = false) {
     autoStatus = "error";
     render();
   }
+}
+
+/* --- Обогащение авто-каталога: постеры, описание, жанры, оценка, MAL ID --- */
+const STATUS_MAP = { ongoing: "ongoing", released: "released", anons: "announced", anons_: "announced" };
+
+async function enrichAutoEntries(entries) {
+  const ids = [...new Set(entries.map((entry) => entry.shikimoriId).filter(Boolean))];
+  let map = {};
+  if (ids.length) {
+    try {
+      map = await getShikimoriBatch(ids);
+    } catch (error) {
+      console.debug("Обогащение каталога:", error?.message);
+    }
+  }
+  entries.forEach((entry) => {
+    const info = map[entry.shikimoriId];
+    if (info) {
+      entry.title = info.title || entry.title;
+      entry.originalTitle = entry.originalTitle || info.originalTitle || "";
+      entry.description = info.description || "";
+      entry.genres = Array.isArray(info.genres) ? info.genres : [];
+      entry.rating = Number(info.rating) || 0;
+      entry.year = entry.year || info.year;
+      entry.status = STATUS_MAP[info.status] || entry.status || "ongoing";
+      entry.malId = Number(info.malId) || entry.malId || 0;
+      entry.poster = info.poster || entry.poster;
+    }
+    if (!entry.poster && entry.shikimoriId) entry.poster = posterUrlById(entry.shikimoriId);
+    if (!entry.description) entry.description = "";
+  });
+  return entries;
+}
+
+/* --- CVH: подтягиваем плеер «Рабочей партии» к каждой серии --- */
+const CVH_WORKERS = 4;
+
+function cvhPlayerFor(episode, studio) {
+  return {
+    name: `CVH · ${episode.studio || studio}`,
+    type: "cvh",
+    url: sources.cvhPlayerUrl(episode.vkId),
+    code: "",
+  };
+}
+
+async function attachCvhPlayers(entries) {
+  const s = settings();
+  const studio = String(s.cvhTranslation || "Рабочая партия").trim();
+  const pub = String(s.cvhPub || "747").trim();
+  const aggr = String(s.cvhAggr || "mali").trim();
+  const proxy = String(s.corsProxy || "").trim();
+  const targets = entries.filter((entry) => {
+    if (!(entry.malId || entry.shikimoriId)) return false;
+    return !entry.episodes.some((episode) => (episode.players || []).some((player) => player.type === "cvh"));
+  });
+  if (!targets.length) return false;
+
+  let index = 0;
+  let changed = false;
+  const worker = async () => {
+    while (index < targets.length) {
+      const entry = targets[index];
+      index += 1;
+      try {
+        const items = await sources.cvhPlaylist({ id: entry.malId || entry.shikimoriId, pub, aggr, proxy });
+        const found = sources.cvhEpisodes(items, { translation: studio });
+        found.forEach((episode) => {
+          const player = cvhPlayerFor(episode, studio);
+          const existing = entry.episodes.find((item) => item.number === episode.number);
+          if (existing) {
+            const players = Array.isArray(existing.players) ? existing.players : [];
+            if (players.some((item) => item.url === player.url)) return;
+            existing.players = [...players, player];
+            if (!existing.title && episode.title) existing.title = episode.title;
+          } else {
+            entry.episodes.push({ number: episode.number, title: episode.title || "", date: "", duration: "", players: [player] });
+          }
+          changed = true;
+        });
+        entry.episodes.sort((a, b) => a.number - b.number);
+      } catch (error) {
+        console.debug("CVH для", entry.title, error?.message);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CVH_WORKERS, targets.length) }, worker));
+  return changed;
+}
+
+/** Переносит свежие данные авто-каталога в текущий каталог (по id карточки). */
+function patchAutoEntries(entries) {
+  const current = store.getCatalog();
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  let touched = false;
+  const anime = current.anime.map((item) => {
+    const fresh = byId.get(item.id);
+    if (!fresh) return item;
+    touched = true;
+    return { ...item, ...fresh, published: item.published !== false, createdAt: item.createdAt };
+  });
+  if (!touched) return;
+  const merged = store.normalizeCatalog({ ...current, anime });
+  store.setCatalog(merged);
+  catalog = merged;
+  render();
 }
 
 function mergeAutoCatalog(entries, rerender = false) {

@@ -1146,14 +1146,15 @@ export function kodikEpisodes(item) {
     const season = seasons[seasonKey] || {};
     const episodes = season.episodes || {};
     Object.keys(episodes).forEach((episodeKey) => {
-      const episode = episodes[episodeKey] || {};
-      const link = kodikLink(episode.link);
+      const raw = episodes[episodeKey];
+      /* новый API отдаёт серии просто строкой со ссылкой, старый — объектом { link } */
+      const link = kodikLink(typeof raw === "string" ? raw : raw?.link);
       if (!link) return;
       list.push({
         season: Number(seasonKey) || 1,
         number: Number(episodeKey) || list.length + 1,
         link,
-        screenshots: episode.screenshots || [],
+        screenshots: (raw && typeof raw === "object" && Array.isArray(raw.screenshots)) ? raw.screenshots : [],
       });
     });
   });
@@ -1423,6 +1424,8 @@ export function kodikCatalogEntries(items = [], { translation = "Рабочая 
       year: Number(item.year) || new Date().getFullYear(),
       shikimoriId,
       poster: shikimoriId ? posterUrlById(shikimoriId) : "",
+      /* кадр из серии — запасная «обложка» для шапки, если постера нет */
+      banner: Array.isArray(item.screenshots) && item.screenshots.length ? String(item.screenshots[0]) : "",
       episodesCount: episodes.length,
       episodes: episodes.map((episode) => ({
         number: episode.number,

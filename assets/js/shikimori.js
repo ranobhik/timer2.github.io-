@@ -99,6 +99,27 @@ export async function searchAnime(query) {
   return Array.isArray(list) && list.length ? list[0] : null;
 }
 
+/** Пакетная загрузка: /animes?ids=1,2,3 — 30 id за запрос, ответ кешируется в localStorage. */
+export async function getShikimoriBatch(ids = []) {
+  const clean = [...new Set((Array.isArray(ids) ? ids : [])
+    .map((id) => String(id || "").replace(/\D/g, ""))
+    .filter(Boolean))];
+  const out = {};
+  for (let i = 0; i < clean.length; i += 30) {
+    const chunk = clean.slice(i, i + 30);
+    try {
+      const data = await request(`/animes?ids=${chunk.join(",")}&limit=${chunk.length}`);
+      (Array.isArray(data) ? data : []).forEach((raw) => {
+        const mapped = mapShikimori(raw);
+        if (mapped) out[String(raw.id)] = mapped;
+      });
+    } catch (error) {
+      console.debug("Shikimori batch:", error?.message);
+    }
+  }
+  return out;
+}
+
 /* ---------- Преобразование ---------- */
 export function pickPoster(data) {
   return absoluteShikimoriUrl(data?.image?.original || data?.image?.preview || "");
@@ -130,6 +151,7 @@ export function mapShikimori(data) {
   const score = Number(data.score);
   return {
     shikimoriId: data.id ? String(data.id) : "",
+    malId: Number(data.myanimelist_id || data.mal_id) || 0,
     poster: pickPoster(data),
     title: data.russian || data.name || "",
     originalTitle: data.name || "",

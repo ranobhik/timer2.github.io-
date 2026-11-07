@@ -1404,13 +1404,10 @@ async function handleCheckKeys(btn) {
   try {
     if (!keys.kodikToken) line(false, "Kodik: токен не задан");
     else {
-      try {
-        const list = await sources.kodikTranslations({ token: keys.kodikToken, proxy });
-        const wanted = String(settings.kodikTranslation || "Рабочая партия").toLowerCase();
-        const hits = list.filter((item) => item.title.toLowerCase().includes(wanted));
-        line(true, `Kodik: ответ получен, озвучек ${list.length}${hits.length ? `, «${hits[0].title}» найдена` : ", но нужной озвучки нет"}`);
-      } catch (error) {
-        line(false, `Kodik: ${error?.message || "ошибка запроса"}`);
+      const probes = await sources.probeKodik({ token: keys.kodikToken, proxy });
+      probes.forEach((probe) => line(probe.ok, `Kodik ${probe.label}: ${probe.detail} (${probe.ms} мс)`));
+      if (!probes.some((probe) => probe.ok)) {
+        line(false, "Kodik: ни один путь не работает — включите VPN или впишите свой CORS-прокси");
       }
     }
     try {

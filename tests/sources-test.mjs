@@ -230,5 +230,26 @@ const exported = JSON.parse(store.exportJSON({ settings: { kodikToken: "secret",
 check("Токены не публикуются", !exported.settings.kodikToken && !exported.settings.kinopoiskToken, JSON.stringify(exported.settings));
 check("Остальные настройки сохраняются", exported.settings.title === "x", JSON.stringify(exported.settings));
 
+/* Kodik блокируется напрямую — должен ответить прокси, без ожидания очереди */
+const beforeRepair = globalThis.fetch;
+globalThis.fetch = async (url, opts = {}) => {
+  const u = String(url);
+  if (u.startsWith("https://kodikapi.com")) throw new TypeError("Failed to fetch");
+  if (u.includes("allorigins")) {
+    await new Promise((r) => setTimeout(r, 40));
+    return { ok: true, status: 200, json: async () => ({ results: [{ id: 7, title: "Рабочая партия", type: "voice" }] }) };
+  }
+  if (/codetabs|cors\.eu\.org|workers\.dev/.test(u)) throw new TypeError("Failed to fetch");
+  return beforeRepair(url, opts);
+};
+const raceStart = Date.now();
+const viaProxy = await sources.kodikTranslations({ token: "t" });
+const raceMs = Date.now() - raceStart;
+check("Kodik через прокси, когда прямой путь закрыт", viaProxy[0]?.title === "Рабочая партия", JSON.stringify(viaProxy));
+check(`Прокси: параллельно, а не по очереди (${raceMs} мс)`, raceMs < 400, String(raceMs));
+const probes = await sources.probeKodik({ token: "t", timeout: 3000 });
+check("Проверка ключей: отчёт по каждому пути", probes.length === 5 && probes.filter((p) => p.ok).length === 1, JSON.stringify(probes.map((p) => `${p.label}:${p.ok}`)));
+globalThis.fetch = beforeRepair;
+
 console.log(`\n${pass}/${pass + fail} проверок пройдено`);
 if (fail) process.exit(1);

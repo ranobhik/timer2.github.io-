@@ -1126,4 +1126,80 @@ export async function kodikList({ token, translationId = "", proxy = "", types =
   return collected;
 }
 
+/* =======================================================================
+   CVH (CDNVideoHub) — плеер, который использует Shikimori и партнёрские сайты
+   Открытый API: /playlist отдаёт все серии и озвучки тайтла,
+   /video/<vkId> — ссылки на поток конкретной серии.
+   ======================================================================= */
+const CVH_API = "https://plapi.cdnvideohub.com/api/v1/player/sv";
+
+async function cvhRequest(url, proxy = "", timeout = 16000) {
+  try {
+    return await request(url, { timeout, cache: false });
+  } catch (error) {
+    if (!proxy) throw error;
+    console.debug("CVH: пробую CORS-прокси", error?.message);
+    return request(proxied(url, proxy), { timeout, cache: false });
+  }
+}
+
+/** Все серии и озвучки тайтла CVH по его числовому ID. */
+export async function cvhPlaylist({ id, pub = "747", aggr = "mali", proxy = "" } = {}) {
+  const clean = String(id || "").trim();
+  if (!clean) throw new Error("Не указан ID тайтла в CVH");
+  const url = `${CVH_API}/playlist?pub=${encodeURIComponent(pub)}&aggr=${encodeURIComponent(aggr)}&id=${encodeURIComponent(clean)}`;
+  const data = await cvhRequest(url, proxy);
+  const items = Array.isArray(data?.items) ? data.items : [];
+  return items
+    .map((item) => ({
+      cvhId: String(item?.cvhId || ""),
+      vkId: String(item?.vkId || ""),
+      studio: String(item?.voiceStudio || "").trim(),
+      voiceType: String(item?.voiceType || "").trim(),
+      season: Number(item?.season) || 1,
+      episode: Number(item?.episode) || 1,
+    }))
+    .filter((item) => item.vkId && item.episode);
+}
+
+/** Озвучки, которые есть в плейлисте: [{ studio, count }]. */
+export function cvhStudios(items = []) {
+  const map = new Map();
+  items.forEach((item) => {
+    const name = String(item?.studio || "").trim();
+    if (!name) return;
+    map.set(name, (map.get(name) || 0) + 1);
+  });
+  return [...map.entries()]
+    .map(([studio, count]) => ({ studio, count }))
+    .sort((a, b) => b.count - a.count || a.studio.localeCompare(b.studio, "ru"));
+}
+
+/** Прямая ссылка на поток конкретной серии CVH (живёт около суток). */
+export async function cvhVideo({ vkId, proxy = "" } = {}) {
+  const clean = String(vkId || "").trim();
+  if (!clean) throw new Error("Не указан идентификатор видео CVH");
+  const data = await cvhRequest(`${CVH_API}/video/${encodeURIComponent(clean)}`, proxy);
+  const list = data?.sources || {};
+  const mp4 = list.mpegFullHdUrl || list.mpegHighUrl || list.mpegMediumUrl || list.mpegLowUrl || "";
+  const url = mp4 || list.hlsUrl || "";
+  if (!url) throw new Error("CVH не вернул ссылку на видео");
+  return {
+    url,
+    hls: !mp4 && Boolean(list.hlsUrl),
+    poster: data?.thumbUrl || "",
+    duration: Number(data?.duration) || 0,
+  };
+}
+
+/** Игрок типа cvh хранит в url только идентификатор видео: cvh:<vkId>. */
+export function cvhPlayerUrl(vkId) {
+  return `cvh:${String(vkId || "").trim()}`;
+}
+
+export function cvhIdFromUrl(url) {
+  const match = /^cvh:(\d+)$/.exec(String(url || "").trim());
+  return match ? match[1] : "";
+}
+
 export { stripHtml, KIND_LABELS };

@@ -1,6 +1,6 @@
 /* Компоненты интерфейса: карточки, постеры, плеер, тосты. */
 
-import { isFavorite } from "./store.js";
+import { getCatalog, isFavorite } from "./store.js";
 import { attr, esc, hueFrom, initials, pluralEpisodes, safeUrl, statusLabel } from "./utils.js";
 
 export const icon = (name, cls = "") =>
@@ -100,6 +100,35 @@ function loadHls() {
   return hlsPromise;
 }
 
+/* CVH (CDNVideoHub) отдаёт ссылку на поток только по запросу и живёт она около суток,
+   поэтому серия CVH хранит идентификатор видео, а ссылка запрашивается при показе. */
+const CVH_API = "https://plapi.cdnvideohub.com/api/v1/player/sv";
+
+function cvhProxy() {
+  try {
+    const settings = (getCatalog?.()?.settings) || {};
+    return String(settings.corsProxy || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+async function cvhStream(vkId) {
+  const url = `${CVH_API}/video/${encodeURIComponent(vkId)}`;
+  let response;
+  try {
+    response = await fetch(url, { cache: "no-store" });
+  } catch (error) {
+    const proxy = cvhProxy();
+    if (!proxy) throw error;
+    response = await fetch(`${proxy}${encodeURIComponent(url)}`, { cache: "no-store" });
+  }
+  if (!response.ok) throw new Error(`CVH ответил ${response.status}`);
+  const data = await response.json();
+  const list = data?.sources || {};
+  return list.mpegFullHdUrl || list.mpegHighUrl || list.mpegMediumUrl || list.mpegLowUrl || list.hlsUrl || "";
+}
+
 export function playerPlaceholder(title, text) {
   return `<div class="player-placeholder">
     ${icon("play")}
@@ -154,6 +183,27 @@ export function mountPlayer(mount, player, ctx = {}) {
     holder.className = "player-inner";
     mount.append(holder);
     injectHTML(holder, html);
+    return;
+  }
+
+  if (player.type === "cvh") {
+    const vkId = String(player.url || "").replace(/^cvh:/, "").trim();
+    if (!/^\d+$/.test(vkId)) {
+      mount.innerHTML = playerPlaceholder("Плеер CVH не настроен", "В админке нажмите «Плееры из CVH» или вставьте ссылку вручную.");
+      return;
+    }
+    mount.innerHTML = playerPlaceholder("Загружаю плеер CVH…", "Ссылка на видео запрашивается при каждом показе.");
+    cvhStream(vkId)
+      .then((url) => {
+        if (!url) throw new Error("CVH не вернул ссылку на видео");
+        mountPlayer(mount, { ...player, type: "video", url }, ctx);
+      })
+      .catch((error) => {
+        mount.innerHTML = playerPlaceholder(
+          "CVH не ответил",
+          `${error?.message || "Ошибка запроса"} — выберите другой плеер или обновите страницу.`,
+        );
+      });
     return;
   }
 

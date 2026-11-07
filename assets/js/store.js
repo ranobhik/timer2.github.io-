@@ -67,6 +67,9 @@ export const DEFAULT_SETTINGS = {
   kinopoiskToken: "",
   kodikToken: "",
   kodikTranslation: "Рабочая партия",
+  cvhPub: "747",
+  cvhAggr: "mali",
+  cvhTranslation: "Рабочая партия",
   corsProxy: "",
   translateEpisodes: true,
 };
@@ -101,7 +104,7 @@ function normalizeSettings(raw = {}) {
 }
 
 export function normalizePlayer(raw, index = 0) {
-  const type = ["iframe", "html", "video", "demo"].includes(raw?.type) ? raw.type : "demo";
+  const type = ["iframe", "html", "video", "cvh", "demo"].includes(raw?.type) ? raw.type : "demo";
   return {
     id: String(raw?.id || uid("pl")),
     name: String(raw?.name || `Плеер ${index + 1}`),
@@ -276,6 +279,29 @@ export function saveDraft(catalog) {
   return savedAt;
 }
 
+/* Ключи API живут только в браузере админа и никогда не попадают в catalog.json. */
+const KEYS_KEY = "rp.keys.v1";
+
+export function getKeys() {
+  try {
+    const raw = window.localStorage.getItem(KEYS_KEY);
+    const data = raw ? JSON.parse(raw) : null;
+    return data && typeof data === "object" ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+export function saveKeys(patch = {}) {
+  const keys = { ...getKeys(), ...patch };
+  try {
+    window.localStorage.setItem(KEYS_KEY, JSON.stringify(keys));
+  } catch {
+    // localStorage недоступен — ключи просто не сохранятся
+  }
+  return keys;
+}
+
 export function discardDraft() {
   safeRemove(DRAFT_KEY);
   state.draftSavedAt = "";
@@ -286,7 +312,7 @@ export function hasDraft() {
 }
 
 /* Токены API нужны только в браузере админа — в публичный catalog.json они не попадают. */
-const SECRET_KEYS = ["kodikToken", "kinopoiskToken"];
+const SECRET_KEYS = ["kodikToken", "kinopoiskToken", "cvhToken"];
 
 function publicSettings(settings = {}) {
   const copy = { ...settings };

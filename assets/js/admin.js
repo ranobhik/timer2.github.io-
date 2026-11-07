@@ -13,6 +13,7 @@ const PLAYER_TYPES = {
   iframe: "Iframe по ссылке",
   html: "Код вставки (embed)",
   video: "Видеофайл (.mp4 / .m3u8)",
+  cvh: "CVH (CDNVideoHub)",
   demo: "Заглушка (без плеера)",
 };
 
@@ -331,6 +332,7 @@ function blankAnime() {
     poster: "",
     banner: "",
     shikimoriId: "",
+    cvhId: "",
     studio: "",
     director: "",
     country: "Япония",
@@ -486,6 +488,7 @@ function editorHTML(anime, isNew) {
         ${fieldHTML({ label: "Страна", name: "country", value: anime.country })}
         ${fieldHTML({ label: "Теги", name: "tags", value: anime.tags.join(", "), hint: "через запятую" })}
         ${fieldHTML({ label: "Shikimori ID", name: "shikimoriId", value: anime.shikimoriId, placeholder: "16498", hint: "для автопостера" })}
+        ${fieldHTML({ label: "ID в CVH", name: "cvhId", value: anime.cvhId, placeholder: "51019", hint: "для плееров CVH (Shikimori)" })}
 
         <div class="field span-2">
           <label>Описание</label>
@@ -542,6 +545,7 @@ function editorHTML(anime, isNew) {
           </div>
           <div class="field-row" style="gap:8px">
             <button class="btn btn-ghost btn-sm" type="button" id="kodikPlayers">${ui.icon("play")} Плееры из Kodik</button>
+            <button class="btn btn-ghost btn-sm" type="button" id="cvhPlayers">${ui.icon("play")} Плееры из CVH</button>
             <button class="btn btn-ghost btn-sm" type="button" id="translateTitles">${ui.icon("sparkles")} Названия по-русски</button>
             <button class="btn btn-ghost btn-sm" type="button" id="bulkEpisodeTitles">${ui.icon("edit")} Названия списком</button>
             <button class="btn btn-soft btn-sm" type="button" id="addEpisode">${ui.icon("plus")} Эпизод</button>
@@ -618,6 +622,7 @@ function captureEditorValues() {
   editorModel.poster = get("poster").trim();
   editorModel.banner = get("banner").trim();
   editorModel.shikimoriId = get("shikimoriId").trim();
+  editorModel.cvhId = get("cvhId").trim();
   editorModel.published = form.elements.published.checked;
   editorModel.featured = form.elements.featured.checked;
   editorModel.genres = $$("[data-genre-check]:checked").map((input) => input.value);
@@ -1037,7 +1042,7 @@ async function importByValue(value, { withEpisodes = false, source } = {}) {
   if (parsed.id) {
     return sources.importCandidate(
       { source: parsed.source || source || "shikimori", sourceId: parsed.id, title: "" },
-      { kinopoiskToken: draftCatalog.settings.kinopoiskToken || "", withEpisodes },
+      { kinopoiskToken: apiKeys().kinopoiskToken, withEpisodes },
     );
   }
   for (const query of queryVariants(parsed.text)) {
@@ -1051,7 +1056,7 @@ async function importByValue(value, { withEpisodes = false, source } = {}) {
   const list = await sources.searchAniList(parsed.text, 1);
   if (!list.length) throw new Error("Ничего не найдено — попробуйте другое название");
   return sources.importCandidate(list[0], {
-    kinopoiskToken: draftCatalog.settings.kinopoiskToken || "",
+    kinopoiskToken: apiKeys().kinopoiskToken,
     withEpisodes,
   });
 }
@@ -1085,11 +1090,22 @@ async function handlePosterFetch(btn) {
   }
 }
 
+/* Ключи API хранятся в браузере, а не в каталоге. */
+function apiKeys() {
+  const keys = store.getKeys();
+  const settings = draftCatalog.settings || {};
+  return {
+    kinopoiskToken: String(keys.kinopoiskToken || "").trim(),
+    kodikToken: String(keys.kodikToken || "").trim(),
+    cvhToken: String(keys.cvhToken || "").trim(),
+  };
+}
+
 /* ---------- Kodik: плееры озвучки ---------- */
 function kodikSettings() {
   const settings = draftCatalog.settings || {};
   return {
-    token: String(settings.kodikToken || "").trim(),
+    token: apiKeys().kodikToken,
     filter: String(settings.kodikTranslation || "Рабочая партия").trim().toLowerCase(),
     proxy: String(settings.corsProxy || "").trim(),
   };
@@ -1171,6 +1187,118 @@ async function handleKodikPlayers(btn) {
   }
 }
 
+/* ---------- CVH: плееры озвучки ---------- */
+function cvhSettings() {
+  const settings = draftCatalog.settings || {};
+  return {
+    filter: String(settings.cvhTranslation || "Рабочая партия").trim().toLowerCase(),
+    pub: String(settings.cvhPub || "747").trim(),
+    aggr: String(settings.cvhAggr || "mali").trim(),
+    proxy: String(settings.corsProxy || "").trim(),
+  };
+}
+
+async function handleCvhPlayers(btn) {
+  const { filter, pub, aggr, proxy } = cvhSettings();
+  if (editorModel) captureEditorValues();
+  const id = String(editorModel?.cvhId || "").trim();
+  if (!id) {
+    ui.toast("Укажите «ID в CVH» — он виден в ссылке плеера на сайтах, где стоит CVH", "err");
+    return;
+  }
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = "Ищу плееры…";
+  try {
+    const items = await sources.cvhPlaylist({ id, pub, aggr, proxy });
+    const studios = sources.cvhStudios(items);
+    const matched = filter
+      ? items.filter((item) => item.studio.toLowerCase().includes(filter))
+      : items;
+    if (!matched.length) {
+      ui.toast(studios.length
+        ? `В CVH есть озвучки: ${studios.slice(0, 6).map((x) => x.studio).join(", ")}`
+        : "CVH не отдал серии для этого ID", "err");
+      return;
+    }
+    const episodes = Array.isArray(editorModel.episodes) ? editorModel.episodes : [];
+    let added = 0;
+    matched.forEach((item) => {
+      const player = {
+        name: `CVH · ${item.studio}${item.voiceType ? ` (${item.voiceType})` : ""}`,
+        type: "cvh",
+        url: sources.cvhPlayerUrl(item.vkId),
+        code: "",
+      };
+      if (attachPlayer(episodes, item.episode, player)) added += 1;
+    });
+    editorModel.episodes = episodes;
+    renderEpisodesEditor();
+    const statusEl = document.getElementById("editorStatus");
+    if (statusEl) statusEl.textContent = `Плееры CVH: добавлено ${added} — не забудьте сохранить`;
+    ui.toast(added ? `Добавлено плееров CVH: ${added}` : "Все плееры уже на месте", added ? "ok" : "info");
+  } catch (error) {
+    ui.toast(error?.message || "Не удалось получить плееры CVH", "err");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
+}
+
+/* ---------- Проверка ключей API ---------- */
+async function handleCheckKeys(btn) {
+  const statusEl = $("#keysStatus");
+  const keys = apiKeys();
+  const settings = draftCatalog.settings || {};
+  const proxy = String(settings.corsProxy || "").trim();
+  const say = (html) => { if (statusEl) statusEl.innerHTML = html; };
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = "Проверяю…";
+  const lines = [];
+  const line = (ok, text) => lines.push(`<div>${ok ? "✓" : "✗"} ${esc(text)}</div>`);
+  try {
+    if (!keys.kodikToken) line(false, "Kodik: токен не задан");
+    else {
+      try {
+        const list = await sources.kodikTranslations({ token: keys.kodikToken, proxy });
+        const wanted = String(settings.kodikTranslation || "Рабочая партия").toLowerCase();
+        const hits = list.filter((item) => item.title.toLowerCase().includes(wanted));
+        line(true, `Kodik: ответ получен, озвучек ${list.length}${hits.length ? `, «${hits[0].title}» найдена` : ", но нужной озвучки нет"}`);
+      } catch (error) {
+        line(false, `Kodik: ${error?.message || "ошибка запроса"}`);
+      }
+    }
+    try {
+      const items = await sources.cvhPlaylist({ id: "51019", pub: String(settings.cvhPub || "747").trim(), aggr: String(settings.cvhAggr || "mali").trim(), proxy });
+      const studios = sources.cvhStudios(items);
+      line(true, `CVH: ответ получен, серий ${items.length}, озвучек ${studios.length}`);
+    } catch (error) {
+      line(false, `CVH: ${error?.message || "ошибка запроса"}`);
+    }
+    if (!keys.kinopoiskToken) line(false, "Кинопоиск: токен не задан");
+    else {
+      try {
+        const found = await sources.searchKinopoisk("Наруто", keys.kinopoiskToken, 1);
+        line(true, `Кинопоиск: ответ получен, найдено ${found.length}`);
+      } catch (error) {
+        line(false, `Кинопоиск: ${error?.message || "ошибка запроса"}`);
+      }
+    }
+    try {
+      const map = await sources.translateTitles(["The Mask of the War God"]);
+      const translated = map["The Mask of the War God"] || "";
+      line(Boolean(translated), `Перевод серий: ${translated || "сервис не ответил"}`);
+    } catch (error) {
+      line(false, `Перевод серий: ${error?.message || "ошибка"}`);
+    }
+    say(lines.join(""));
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
+}
+
 /** Перевод названий серий на русский (для уже созданной карточки). */
 async function handleTranslateTitles(btn) {
   if (editorModel) captureEditorValues();
@@ -1218,7 +1346,7 @@ async function handleQuickImport(btn, candidate = null) {
     btn.disabled = true;
     btn.innerHTML = "Ищу…";
   }
-  const kinopoiskToken = draftCatalog.settings.kinopoiskToken || "";
+  const kinopoiskToken = apiKeys().kinopoiskToken;
   try {
     if (editorModel) captureEditorValues();
 
@@ -1284,7 +1412,7 @@ async function searchCandidates(value, source = "shikimori", limit = 6) {
   }
   const text = parsed.text || value;
   if (source === "anilist") return sources.searchAniList(text, limit);
-  if (source === "kinopoisk") return sources.searchKinopoisk(text, draftCatalog.settings.kinopoiskToken || "", limit);
+  if (source === "kinopoisk") return sources.searchKinopoisk(text, apiKeys().kinopoiskToken, limit);
 
   for (const query of queryVariants(text)) {
     try {
@@ -1410,6 +1538,7 @@ function bindEditor(anime, isNew) {
   $("#addEpisode")?.addEventListener("click", addEpisode);
 
   $("#kodikPlayers")?.addEventListener("click", (event) => handleKodikPlayers(event.currentTarget));
+  $("#cvhPlayers")?.addEventListener("click", (event) => handleCvhPlayers(event.currentTarget));
   $("#translateTitles")?.addEventListener("click", (event) => handleTranslateTitles(event.currentTarget));
 
   /* Массовая вставка названий серий: базы данных у новых тайтлов их ещё не знают. */
@@ -1639,7 +1768,7 @@ function importTab() {
       </form>
       <p class="hint" style="margin-top:10px">
         Shikimori и AniList работают без ключей и отдают CORS. Кинопоиску нужен токен из «Настроек сайта»
-        ${s.kinopoiskToken ? "(токен уже сохранён)" : ""}; если браузер заблокирует запрос к нему — используйте Shikimori.
+        ${apiKeys().kinopoiskToken ? "(токен уже сохранён)" : ""}; если браузер заблокирует запрос к нему — используйте Shikimori.
       </p>
     </div>
     <div class="panel">
@@ -1650,7 +1779,7 @@ function importTab() {
         </div>
         <button class="btn" type="button" id="kodikSync">${ui.icon("download")} Синхронизировать</button>
       </div>
-      <p class="hint" id="kodikStatus">${s.kodikToken ? "Токен Kodik сохранён." : "Нужен токен Kodik API — добавьте его в «Настройки сайта»."}</p>
+      <p class="hint" id="kodikStatus">${apiKeys().kodikToken ? "Токен Kodik сохранён." : "Нужен токен Kodik API — добавьте его в «Настройки сайта»."}</p>
     </div>
     <div id="importResults"></div>
   </div>`;
@@ -1687,7 +1816,7 @@ function bindImportTab() {
   const importPicked = async (candidate) => {
     try {
       const raw = await sources.importCandidate(candidate, {
-        kinopoiskToken: draftCatalog.settings.kinopoiskToken || "",
+        kinopoiskToken: apiKeys().kinopoiskToken,
         withEpisodes: Boolean($("#importEpisodes")?.checked),
       });
       const data = await withTranslatedTitles(raw);
@@ -1806,6 +1935,7 @@ function bindGenresTab() {
    Настройки сайта
    ====================================================================== */
 function settingsTab() {
+  const keys = store.getKeys();
   const s = draftCatalog.settings;
   return `<form class="stack" id="settingsForm" style="--gap:18px">
     <div class="panel">
@@ -1836,14 +1966,24 @@ function settingsTab() {
       </div>
       <div class="form-grid">
         <div class="field span-2">
+          <div class="keys-head">
+            <div>
+              <label>Ключи API</label>
+              <p class="hint">Ключи хранятся только в этом браузере (localStorage) и никогда не публикуются в catalog.json. На других устройствах их нужно ввести заново.</p>
+            </div>
+            <button class="btn btn-soft btn-sm" type="button" id="checkKeys">${ui.icon("check")} Проверить ключи</button>
+          </div>
+          <div id="keysStatus" class="hint"></div>
+        </div>
+        <div class="field span-2">
           <label for="s-kinopoisk">Токен Кинопоиска (X-API-KEY)</label>
-          <input id="s-kinopoisk" name="kinopoiskToken" type="text" value="${attr(s.kinopoiskToken || "")}" placeholder="например: 8a1b2c3d-…" autocomplete="off" />
-          <p class="hint">Токен остаётся в вашем браузере — в публикуемый catalog.json он не попадает.</p>
+          <input id="s-kinopoisk" name="kinopoiskToken" type="text" value="${attr(keys.kinopoiskToken || "")}" placeholder="например: 5TXZNZC-…" autocomplete="off" />
+          <p class="hint">Бесплатный тариф — 200 запросов в сутки: импорт по Кинопоиску включайте только когда действительно нужен.</p>
         </div>
         <div class="field span-2">
           <label for="s-kodik">Токен Kodik API <small>для авто-плееров</small></label>
-          <input id="s-kodik" name="kodikToken" type="text" value="${attr(s.kodikToken || "")}" placeholder="токен партнёра kodikapi.com" autocomplete="off" />
-          <p class="hint">Токен не публикуется: он хранится только в вашем браузере. С ним админка сама подставляет плееры озвучки (по умолчанию «Рабочая партия») в серии и умеет синхронизировать каталог с Kodik. Без токена плееры добавляются вручную.</p>
+          <input id="s-kodik" name="kodikToken" type="text" value="${attr(keys.kodikToken || "")}" placeholder="токен партнёра kodikapi.com" autocomplete="off" />
+          <p class="hint">С токеном админка сама подставляет плееры нужной озвучки в серии и умеет синхронизировать каталог с Kodik.</p>
         </div>
         <div class="field">
           <label for="s-kodik-translation">Озвучка в Kodik</label>
@@ -1851,11 +1991,31 @@ function settingsTab() {
           <p class="hint">Фильтр по названию озвучки — подставляются только её плееры.</p>
         </div>
         <div class="field">
-          <label for="s-cors-proxy">CORS-прокси <small>необязательно</small></label>
-          <input id="s-cors-proxy" name="corsProxy" type="text" value="${attr(s.corsProxy || "")}" placeholder="https://api.allorigins.win/raw?url=" autocomplete="off" />
-          <p class="hint">Если браузер блокирует ответ Kodik, запрос пойдёт через прокси.</p>
+          <label for="s-cvh-translation">Озвучка в CVH</label>
+          <input id="s-cvh-translation" name="cvhTranslation" type="text" value="${attr(s.cvhTranslation || "Рабочая партия")}" placeholder="Рабочая партия" autocomplete="off" />
+          <p class="hint">CVH (CDNVideoHub) — плеер, который использует Shikimori.</p>
+        </div>
+        <div class="field">
+          <label for="s-cvh-pub">Партнёрский ID CVH <small>pub</small></label>
+          <input id="s-cvh-pub" name="cvhPub" type="text" value="${attr(s.cvhPub || "747")}" placeholder="747" autocomplete="off" />
+          <p class="hint">Из личного кабинета partners.cdnvideohub.com.</p>
+        </div>
+        <div class="field">
+          <label for="s-cvh-aggr">Агрегатор CVH <small>aggr</small></label>
+          <input id="s-cvh-aggr" name="cvhAggr" type="text" value="${attr(s.cvhAggr || "mali")}" placeholder="mali" autocomplete="off" />
+          <p class="hint">Обычно <code>mali</code>; если CVH не отвечает — уточните в кабинете.</p>
         </div>
         <div class="field span-2">
+          <label for="s-cvh-token">Токен CVH Partners <small>необязательно</small></label>
+          <input id="s-cvh-token" name="cvhToken" type="text" value="${attr(keys.cvhToken || "")}" placeholder="JWT из личного кабинета" autocomplete="off" />
+          <p class="hint">Нужен только для закрытых методов кабинета; плееры работают и без него.</p>
+        </div>
+        <div class="field">
+          <label for="s-cors-proxy">CORS-прокси <small>необязательно</small></label>
+          <input id="s-cors-proxy" name="corsProxy" type="text" value="${attr(s.corsProxy || "")}" placeholder="https://api.allorigins.win/raw?url=" autocomplete="off" />
+          <p class="hint">Если браузер блокирует ответ Kodik или CVH, запрос пойдёт через прокси.</p>
+        </div>
+        <div class="field">
           <label class="switch"><input type="checkbox" name="translateEpisodes" ${s.translateEpisodes !== false ? "checked" : ""} /><span class="track"></span> Переводить названия серий на русский</label>
         </div>
       </div>
@@ -1989,15 +2149,23 @@ function bindSettingsTab() {
     });
   });
 
+  $("#checkKeys")?.addEventListener("click", (event) => handleCheckKeys(event.currentTarget));
+
   form?.addEventListener("submit", (event) => {
     event.preventDefault();
     const get = (name) => form.elements[name]?.value ?? "";
+    store.saveKeys({
+      kinopoiskToken: get("kinopoiskToken").trim(),
+      kodikToken: get("kodikToken").trim(),
+      cvhToken: get("cvhToken").trim(),
+    });
     draftCatalog.settings = {
       ...draftCatalog.settings,
       siteName: get("siteName").trim() || "Аниме-портал",
-      kinopoiskToken: get("kinopoiskToken").trim(),
-      kodikToken: get("kodikToken").trim(),
       kodikTranslation: get("kodikTranslation").trim() || "Рабочая партия",
+      cvhTranslation: get("cvhTranslation").trim() || "Рабочая партия",
+      cvhPub: get("cvhPub").trim() || "747",
+      cvhAggr: get("cvhAggr").trim() || "mali",
       corsProxy: get("corsProxy").trim(),
       translateEpisodes: Boolean(form.elements.translateEpisodes?.checked),
       tagline: get("tagline").trim(),

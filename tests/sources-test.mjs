@@ -217,12 +217,9 @@ check("Kodik→карточка: плеер это ссылка Kodik", /kodikpl
 check("Kodik→карточка: постер не выдумываем", catalogEntries[0].poster === "", catalogEntries[0].poster);
 check("Kodik→карточка: кадр как запасная обложка", Boolean(catalogEntries[0].banner), catalogEntries[0].banner);
 check(
-  "Kodik→карточка: старая загрузка (до 2025) скрыта",
-  sources.kodikCatalogEntries([{ ...KODIK_ITEM, created_at: "2023-05-01T10:00:00Z" }], { translation: "Рабочая партия" }).length === 0,
-);
-check(
-  "Kodik→карточка: свежая загрузка старого тайтла остаётся",
-  sources.kodikCatalogEntries([{ ...KODIK_ITEM, year: 2011, created_at: "2025-04-02T10:00:00Z" }], { translation: "Рабочая партия" }).length === 1,
+  "Kodik→карточка: даты загрузки и обновления сохранены",
+  catalogEntries[0]?.sourceUpdatedAt === "2026-03-01T12:00:00.000Z" && catalogEntries[0]?.uploadedAt === "2026-02-10T12:00:00.000Z",
+  `${catalogEntries[0]?.uploadedAt} / ${catalogEntries[0]?.sourceUpdatedAt}`,
 );
 check("Kodik→карточка: чужая озвучка отфильтрована", sources.kodikCatalogEntries([KODIK_ITEM], { translation: "AniLibria" }).length === 0);
 

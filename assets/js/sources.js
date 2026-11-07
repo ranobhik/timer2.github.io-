@@ -590,6 +590,18 @@ export async function getJikanAnime(malId) {
 /* ======================================================================
    Эпизоды (Jikan / MyAnimeList, по MAL ID)
    ====================================================================== */
+/** Ищет MAL ID по названию — нужен, когда Shikimori/AniList ещё не связали тайтл с MAL. */
+export async function resolveMalId(title, year = 0) {
+  const query = String(title || "").trim();
+  if (!query) return 0;
+  const data = await request(`${JIKAN_API}/anime?q=${encodeURIComponent(query)}&limit=5&sfw`, { timeout: 7000 });
+  const list = data?.data || [];
+  if (!list.length) return 0;
+  const wanted = Number(year) || 0;
+  const pick = list.find((item) => !wanted || !item.year || Math.abs(Number(item.year) - wanted) <= 1) || list[0];
+  return Number(pick?.mal_id) || 0;
+}
+
 export async function fetchEpisodes(malId, limit = 3) {
   if (!malId) return [];
   const episodes = [];
@@ -803,7 +815,15 @@ export async function enrich(anime, { kinopoiskToken = "", withEpisodes = true, 
   if (shiki?.shikimoriId) report.sources.push("Shikimori");
   if (anilist?.anilistId) report.sources.push("AniList");
 
-  const malId = upfrontMal || Number(result.malId) || Number(shiki?.malId) || Number(anilist?.malId) || 0;
+  let malId = upfrontMal || Number(result.malId) || Number(shiki?.malId) || Number(anilist?.malId) || 0;
+
+  /* У свежих тайтлов Shikimori ещё не знает MAL ID — ищем его по названию,
+     иначе не подтянутся названия и даты серий. */
+  if (!malId) {
+    const guessed = await attempt(() => resolveMalId(result.originalTitle || result.title, result.year));
+    malId = Number(guessed) || 0;
+    if (malId) report.sources.push("MyAnimeList");
+  }
 
   /* MAL ID мог появиться только после ответа Shikimori/AniList — тогда дозапрашиваем
      Jikan и серии (снова параллельно). */
@@ -1200,6 +1220,78 @@ export function cvhPlayerUrl(vkId) {
 export function cvhIdFromUrl(url) {
   const match = /^cvh:(\d+)$/.exec(String(url || "").trim());
   return match ? match[1] : "";
+}
+
+/* ---------- Kodik → карточки каталога ---------- */
+const CYR = {
+  а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z", и: "i",
+  й: "y", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t",
+  у: "u", ф: "f", х: "h", ц: "c", ч: "ch", ш: "sh", щ: "sch", ъ: "", ы: "y", ь: "",
+  э: "e", ю: "yu", я: "ya",
+};
+
+export function translitSlug(text) {
+  return String(text || "")
+    .toLowerCase()
+    .split("")
+    .map((char) => (char in CYR ? CYR[char] : char))
+    .join("")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60) || "anime";
+}
+
+/** Совпадает ли озвучка элемента Kodik с фильтром («Рабочая партия»). */
+export function kodikMatchesTranslation(item, filter) {
+  const wanted = String(filter || "").trim().toLowerCase();
+  if (!wanted) return true;
+  const name = String(item?.translation?.title || "").trim().toLowerCase();
+  if (!name) return false;
+  return name.includes(wanted) || (wanted.includes(name) && name.length > 3);
+}
+
+/**
+ * Превращает элементы Kodik в карточки, пригодные для каталога:
+ * серия = плеер этой озвучки. Постер берётся с Shikimori по его ID.
+ */
+export function kodikCatalogEntries(items = [], { translation = "Рабочая партия", limit = 300 } = {}) {
+  const entries = [];
+  const seen = new Set();
+  items.forEach((item) => {
+    if (entries.length >= limit) return;
+    if (!kodikMatchesTranslation(item, translation)) return;
+    const episodes = Array.isArray(item.episodes) && item.episodes.length ? item.episodes : kodikEpisodes(item);
+    if (!episodes.length) return;
+    const title = String(item.title || item.title_orig || "").trim();
+    if (!title) return;
+    const shikimoriId = String(item.shikimoriId || item.shikimori_id || "");
+    const key = shikimoriId || translitSlug(title);
+    if (seen.has(key)) return;
+    seen.add(key);
+    entries.push({
+      id: `kodik-${translitSlug(item.id || title)}`,
+      source: "kodik",
+      title,
+      originalTitle: String(item.originalTitle || item.title_orig || "").trim(),
+      year: Number(item.year) || new Date().getFullYear(),
+      shikimoriId,
+      poster: shikimoriId ? posterUrlById(shikimoriId) : "",
+      episodesCount: episodes.length,
+      episodes: episodes.map((episode) => ({
+        number: episode.number,
+        title: "",
+        date: "",
+        duration: "",
+        players: [{
+          name: String(item.translation?.title || translation || "Плеер").trim(),
+          type: "iframe",
+          url: episode.link,
+          code: "",
+        }],
+      })),
+    });
+  });
+  return entries;
 }
 
 export { stripHtml, KIND_LABELS };

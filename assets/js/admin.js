@@ -1142,8 +1142,33 @@ function attachPlayer(episodes, number, player) {
   return true;
 }
 
-async function handleKodikPlayers(btn) {
+/** Подтягивает плееры Kodik в текущую карточку. Возвращает { added, total }. */
+async function attachKodikPlayers() {
   const { token, filter, proxy } = kodikSettings();
+  if (!token || !editorModel) return { added: 0, total: 0, reason: "нет токена" };
+  const results = await sources.kodikSearch({
+    token,
+    shikimoriId: editorModel.shikimoriId,
+    title: editorModel.shikimoriId ? "" : (editorModel.originalTitle || editorModel.title),
+    proxy,
+  });
+  const matched = results.filter((item) => translationMatches(item, filter));
+  const episodes = Array.isArray(editorModel.episodes) ? editorModel.episodes : [];
+  let added = 0;
+  matched.forEach((item) => {
+    item.episodes.forEach((episode) => {
+      if (attachPlayer(episodes, episode.number, kodikPlayerOf(item, episode))) added += 1;
+    });
+  });
+  if (added) {
+    editorModel.episodes = episodes;
+    renderEpisodesEditor();
+  }
+  return { added, total: results.length, matched: matched.length };
+}
+
+async function handleKodikPlayers(btn) {
+  const { token } = kodikSettings();
   if (!token) {
     ui.toast("Сначала укажите токен Kodik в «Настройках сайта»", "err");
     return;
@@ -1154,28 +1179,15 @@ async function handleKodikPlayers(btn) {
   btn.disabled = true;
   btn.innerHTML = "Ищу плееры…";
   try {
-    const results = await sources.kodikSearch({
-      token,
-      shikimoriId: editorModel.shikimoriId,
-      title: editorModel.shikimoriId ? "" : (editorModel.originalTitle || editorModel.title),
-      proxy,
-    });
-    const matched = results.filter((item) => translationMatches(item, filter));
-    if (!matched.length) {
-      ui.toast(results.length
-        ? `Найдено озвучек: ${results.length}, но «${draftCatalog.settings.kodikTranslation}» среди них нет`
-        : "Kodik не знает этот тайтл", "err");
+    const { added, total, matched } = await attachKodikPlayers();
+    if (!total) {
+      ui.toast("Kodik не знает этот тайтл", "err");
       return;
     }
-    const episodes = Array.isArray(editorModel.episodes) ? editorModel.episodes : [];
-    let added = 0;
-    matched.forEach((item) => {
-      item.episodes.forEach((episode) => {
-        if (attachPlayer(episodes, episode.number, kodikPlayerOf(item, episode))) added += 1;
-      });
-    });
-    editorModel.episodes = episodes;
-    renderEpisodesEditor();
+    if (!matched) {
+      ui.toast(`Найдено озвучек: ${total}, но «${draftCatalog.settings.kodikTranslation}» среди них нет`, "err");
+      return;
+    }
     const statusEl = document.getElementById("editorStatus");
     if (statusEl) statusEl.textContent = `Плееры Kodik: добавлено ${added} — не забудьте сохранить`;
     ui.toast(added ? `Добавлено плееров: ${added}` : "Все плееры уже на месте", added ? "ok" : "info");
@@ -1184,6 +1196,21 @@ async function handleKodikPlayers(btn) {
   } finally {
     btn.disabled = false;
     btn.innerHTML = original;
+  }
+}
+
+/** Авто-подстановка плееров сразу после импорта (настройка «Подтягивать плееры»). */
+async function autoKodikAfterImport() {
+  if (draftCatalog.settings.autoPlayers === false) return;
+  try {
+    const { added } = await attachKodikPlayers();
+    if (added) {
+      const statusEl = document.getElementById("editorStatus");
+      if (statusEl) statusEl.textContent = `Плееры Kodik подставлены автоматически: ${added}`;
+      ui.toast(`Плееры Kodik подставлены: ${added}`, "ok");
+    }
+  } catch (error) {
+    console.debug("Авто-плееры Kodik:", error?.message);
   }
 }
 
@@ -1286,6 +1313,25 @@ async function handleCheckKeys(btn) {
       }
     }
     try {
+      const shiki = await sources.getShikimori(61999);
+      line(Boolean(shiki), `Shikimori: ${shiki ? `«${shiki.title}», MAL ID ${shiki.malId || "нет"}` : "ответ пустой"}`);
+    } catch (error) {
+      line(false, `Shikimori: ${error?.message || "ошибка запроса"}`);
+    }
+    try {
+      const episodes = await sources.fetchEpisodes(61999, 1);
+      const titled = episodes.filter((episode) => episode.title).length;
+      line(episodes.length > 0, `MyAnimeList (Jikan): серий ${episodes.length}, с названиями ${titled}`);
+    } catch (error) {
+      line(false, `MyAnimeList (Jikan): ${error?.message || "недоступен из этой сети"}`);
+    }
+    try {
+      const media = await sources.getAniListByMal(61999);
+      line(Boolean(media), `AniList: ${media ? `«${media.title}»` : "ответ пустой"}`);
+    } catch (error) {
+      line(false, `AniList: ${error?.message || "ошибка запроса"}`);
+    }
+    try {
       const map = await sources.translateTitles(["The Mask of the War God"]);
       const translated = map["The Mask of the War God"] || "";
       line(Boolean(translated), `Перевод серий: ${translated || "сервис не ответил"}`);
@@ -1373,6 +1419,7 @@ async function handleQuickImport(btn, candidate = null) {
         : await importByValue(value, { withEpisodes: true });
     const data = await withTranslatedTitles(raw);
     applyImportedFields(data);
+    await autoKodikAfterImport();
     if (input) input.value = "";
     ui.toast(importSummary(data), "ok");
   } catch (error) {
@@ -1611,6 +1658,14 @@ function bindEditor(anime, isNew) {
     const status = $("#editorStatus");
     if (status) status.textContent = "Есть несохранённые изменения";
   });
+
+  /* Карточка без плееров (например, только что из импорта) — сразу подставляем
+     плееры нужной озвучки, если это включено в настройках. */
+  const hasPlayers = (editorModel?.episodes || [])
+    .some((ep) => (ep.players || []).some((pl) => pl.type !== "demo" && (pl.url || pl.code)));
+  if (!hasPlayers && draftCatalog.settings.autoPlayers !== false) {
+    setTimeout(() => autoKodikAfterImport(), 250);
+  }
 
   void anime;
   void isNew;
@@ -2018,6 +2073,13 @@ function settingsTab() {
         <div class="field">
           <label class="switch"><input type="checkbox" name="translateEpisodes" ${s.translateEpisodes !== false ? "checked" : ""} /><span class="track"></span> Переводить названия серий на русский</label>
         </div>
+        <div class="field">
+          <label class="switch"><input type="checkbox" name="autoPlayers" ${s.autoPlayers !== false ? "checked" : ""} /><span class="track"></span> Подтягивать плееры Kodik сразу при импорте</label>
+        </div>
+        <div class="field span-2">
+          <label class="switch"><input type="checkbox" name="kodikAuto" ${s.kodikAuto !== false ? "checked" : ""} /><span class="track"></span> Публиковать на сайте всё, что залито в плееры нужной озвучки</label>
+          <p class="hint">Сайт сам подтягивает из Kodik тайтлы озвучки и показывает их в каталоге (кэш 6 часов). Ничего не коммитится — обновляется у каждого зрителя.</p>
+        </div>
       </div>
     </div>
 
@@ -2168,6 +2230,8 @@ function bindSettingsTab() {
       cvhAggr: get("cvhAggr").trim() || "mali",
       corsProxy: get("corsProxy").trim(),
       translateEpisodes: Boolean(form.elements.translateEpisodes?.checked),
+      autoPlayers: Boolean(form.elements.autoPlayers?.checked),
+      kodikAuto: Boolean(form.elements.kodikAuto?.checked),
       tagline: get("tagline").trim(),
       logo: get("logo").trim(),
       footerText: get("footerText").trim(),

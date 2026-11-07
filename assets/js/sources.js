@@ -1029,15 +1029,35 @@ function proxied(url, proxy) {
   return proxy ? `${proxy}${encodeURIComponent(url)}` : url;
 }
 
+/* Публичные CORS-прокси: пробуем по очереди, если прямой запрос не прошёл. */
+const PUBLIC_PROXIES = [
+  "https://api.allorigins.win/raw?url=",
+  "https://api.codetabs.com/v1/proxy?quest=",
+  "https://corsproxy.io/?url=",
+];
+
+/** Прямой запрос, затем свой прокси (если задан) или публичные по очереди. */
+async function requestWithFallback(url, { proxy = "", timeout = 16000 } = {}) {
+  try {
+    return await request(url, { timeout, cache: false });
+  } catch (error) {
+    const list = proxy ? [proxy] : PUBLIC_PROXIES;
+    for (const candidate of list) {
+      try {
+        const data = await request(proxied(url, candidate), { timeout, cache: false });
+        console.debug("Запрос через прокси:", candidate);
+        return data;
+      } catch (proxyError) {
+        console.debug("Прокси не помог:", candidate, proxyError?.message);
+      }
+    }
+    throw error;
+  }
+}
+
 async function kodikRequest(path, params, { proxy = "", timeout = 16000 } = {}) {
   const direct = `${KODIK_API}${path}?${new URLSearchParams(params).toString()}`;
-  try {
-    return await request(direct, { timeout, cache: false });
-  } catch (error) {
-    if (!proxy) throw error;
-    console.debug("Kodik: пробую CORS-прокси", error?.message);
-    return request(proxied(direct, proxy), { timeout, cache: false });
-  }
+  return requestWithFallback(direct, { proxy, timeout });
 }
 
 function kodikLink(link) {
@@ -1154,13 +1174,7 @@ export async function kodikList({ token, translationId = "", proxy = "", types =
 const CVH_API = "https://plapi.cdnvideohub.com/api/v1/player/sv";
 
 async function cvhRequest(url, proxy = "", timeout = 16000) {
-  try {
-    return await request(url, { timeout, cache: false });
-  } catch (error) {
-    if (!proxy) throw error;
-    console.debug("CVH: пробую CORS-прокси", error?.message);
-    return request(proxied(url, proxy), { timeout, cache: false });
-  }
+  return requestWithFallback(url, { proxy, timeout });
 }
 
 /** Все серии и озвучки тайтла CVH по его числовому ID. */

@@ -57,6 +57,9 @@ async function boot() {
 const AUTO_KEY = "rp.auto.v1";
 const AUTO_TTL = 6 * 60 * 60 * 1000;
 let autoLoaded = false;
+/* idle | loading | done | empty | error | off — состояние авто-каталога */
+let autoStatus = "idle";
+let autoError = "";
 
 function readAutoCache() {
   try {
@@ -79,17 +82,34 @@ function writeAutoCache(entries) {
   }
 }
 
-async function loadAutoCatalog() {
+async function loadAutoCatalog(force = false) {
   const s = settings();
-  if (!s.kodikAuto || autoLoaded) return;
-  const keys = store.getKeys();
-  if (!keys.kodikToken) return;
-
-  const cached = readAutoCache();
-  if (cached) {
-    mergeAutoCatalog(cached);
+  if (autoStatus === "loading") return;
+  if (!s.kodikAuto) {
+    autoStatus = "off";
     return;
   }
+  if (autoLoaded && !force) return;
+
+  const keys = store.getKeys();
+  if (!keys.kodikToken) {
+    autoStatus = "error";
+    autoError = "Не задан токен Kodik";
+    return;
+  }
+
+  if (!force) {
+    const cached = readAutoCache();
+    if (cached) {
+      autoStatus = "done";
+      mergeAutoCatalog(cached, true);
+      return;
+    }
+  }
+
+  autoStatus = "loading";
+  autoError = "";
+  if (!store.publicAnime().length) render();
 
   const proxy = String(s.corsProxy || "").trim();
   const filter = String(s.kodikTranslation || "Рабочая партия").trim();
@@ -97,22 +117,33 @@ async function loadAutoCatalog() {
     const list = await sources.kodikTranslations({ token: keys.kodikToken, proxy });
     const found = list.filter((item) => item.title.toLowerCase().includes(filter.toLowerCase()));
     if (!found.length) {
-      console.debug("Авто-каталог: озвучка не найдена в Kodik");
+      autoStatus = "empty";
+      autoError = `В Kodik нет озвучки «${filter}»`;
+      render();
       return;
     }
-    const items = await sources.kodikList({ token: keys.kodikToken, translationId: found[0].id, proxy, maxPages: 2 });
+    const items = await sources.kodikList({ token: keys.kodikToken, translationId: found[0].id, proxy, maxPages: 3 });
     const entries = sources.kodikCatalogEntries(items, { translation: found[0].title });
-    if (!entries.length) return;
     writeAutoCache(entries);
-    mergeAutoCatalog(entries);
+    if (!entries.length) {
+      autoStatus = "empty";
+      autoError = `У озвучки «${found[0].title}» пока нет серий`;
+      render();
+      return;
+    }
+    autoStatus = "done";
+    mergeAutoCatalog(entries, true);
   } catch (error) {
-    console.debug("Авто-каталог Kodik недоступен:", error?.message);
+    autoStatus = "error";
+    autoError = error?.message || "Kodik недоступен";
+    console.debug("Авто-каталог Kodik недоступен:", autoError);
+    render();
   }
 }
 
-function mergeAutoCatalog(entries) {
+function mergeAutoCatalog(entries, rerender = false) {
   if (!Array.isArray(entries) || !entries.length) return;
-  if (/^#\/admin/.test(location.hash)) return;
+  if (/^#\/admin/.test(location.hash) && !rerender) return;
   const current = store.getCatalog();
   const known = new Set();
   current.anime.forEach((anime) => {
@@ -123,9 +154,11 @@ function mergeAutoCatalog(entries) {
     if (entry.shikimoriId && known.has(`s${entry.shikimoriId}`)) return false;
     return !known.has(`t${String(entry.title || "").toLowerCase()}`);
   });
-  if (!fresh.length) return;
-
   autoLoaded = true;
+  if (!fresh.length) {
+    if (rerender) render();
+    return;
+  }
   const merged = store.normalizeCatalog({ ...current, anime: [...current.anime, ...fresh] });
   store.setCatalog(merged);
   catalog = merged;
@@ -1387,7 +1420,8 @@ function notFoundView(message = "Проверьте адрес или верни
 async function adminView(segments) {
   setTitle("Админ-панель");
   try {
-    const mod = await import("./admin.js");
+    const version = new URL(import.meta.url).search;
+    const mod = await import(`./admin.js${version}`);
     await mod.renderAdmin({
       mount: view,
       segments,

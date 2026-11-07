@@ -160,6 +160,7 @@ await wait(1200);
 const storeMod = await import(`${ROOT}/assets/js/store.js`);
 const autoAnime = storeMod.getCatalog().anime.filter((a) => a.id.startsWith("kodik-"));
 check("Авто-каталог: карточка из Kodik", autoAnime.length === 1, String(autoAnime.length));
+check("В каталоге только тайтлы озвучки", storeMod.getCatalog().anime.every((a) => a.id.startsWith("kodik-")), String(storeMod.getCatalog().anime.length));
 check("Авто-каталог: плееры в сериях", autoAnime[0]?.episodes?.[0]?.players?.[0]?.type === "iframe", JSON.stringify(autoAnime[0]?.episodes?.[0]?.players));
 
 /* CVH-плеер на публичной странице */

@@ -2,7 +2,6 @@
    настройки пользователя и «авторизация» админки. */
 
 import { clone, hashString, slugify, uid } from "./utils.js";
-import { DEFAULT_KEYS } from "./config.js";
 
 const DRAFT_KEY = "rp.draft.v1";
 const PREFS_KEY = "rp.prefs.v1";
@@ -153,6 +152,8 @@ export function normalizeAnime(raw, index = 0) {
     poster: String(item.poster || ""),
     banner: String(item.banner || ""),
     shikimoriId: String(item.shikimoriId || ""),
+    cvhId: String(item.cvhId || ""),
+    source: String(item.source || ""),
     studio: String(item.studio || ""),
     director: String(item.director || ""),
     country: String(item.country || "Япония"),
@@ -282,8 +283,17 @@ export function saveDraft(catalog) {
   return savedAt;
 }
 
-/* Ключи API живут только в браузере админа и никогда не попадают в catalog.json. */
+/* Ключи API живут только в браузере админа и никогда не попадают в catalog.json.
+   Значения по умолчанию лежат здесь, чтобы сайт работал сразу после открытия:
+   статический сайт всё равно отдаёт ключ в браузер, иначе он не сработает. */
 const KEYS_KEY = "rp.keys.v1";
+const DEFAULT_KEYS = {
+  kodikToken: "d6a9c41c60eae7abeb43f91ea50e2302",
+  kinopoiskToken: "5TXZNZC-33YMWQ4-KWGK3FR-JPNN4G1",
+  cvhToken:
+    "eyJhbGciOiJFUzUxMiIsInR5cCI6IkpXVCJ9.eyJhZG1pbiI6ZmFsc2UsImlhdCI6MTc5MjU3NzgyNCwidWlkIjoiemxvLXJhbm9iIn0."
+    + "AcRJ6CdMHhJNv1coMtfSU9EKFOwUyJMh2uiPNL-N96kbKQLqvCcuaSVxNytlsH2Rs_xzeRHD3gzjNqv8kza6y0dnACwAM3i6737n6f0CnYpGBt188Yofm-6HwnqkJHJx0gxuqqrZsaWv387mDcZ4rY1unA2Pa0aUMzlKK31vfq08elrh",
+};
 
 export function getKeys() {
   let stored = {};

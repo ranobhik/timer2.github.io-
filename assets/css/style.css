@@ -1180,6 +1180,19 @@ main { display: block; min-height: 60vh; padding-bottom: 40px; }
 .player-frame video { object-fit: contain; background: #000; }
 
 /* Выбор качества в плеере CVH */
+/* рамка тянется по содержимому, чтобы панели качества и скорости были видны */
+.player-frame.has-cvh,
+.player-frame:has(.cvh-player) {
+  aspect-ratio: auto;
+  max-height: none;
+}
+.player-frame.has-cvh > .player-inner,
+.player-frame:has(.cvh-player) > .player-inner {
+  position: static;
+  inset: auto;
+  height: auto;
+  overflow: visible;
+}
 .cvh-player {
   display: flex;
   flex-direction: column;
@@ -1188,8 +1201,10 @@ main { display: block; min-height: 60vh; padding-bottom: 40px; }
 }
 .cvh-player video {
   width: 100%;
+  height: auto;
   max-height: min(72vh, 620px);
-  flex: 1 1 auto;
+  flex: none;
+  background: #000;
 }
 .cvh-quality {
   display: flex;

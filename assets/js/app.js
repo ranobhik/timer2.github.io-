@@ -853,8 +853,8 @@ function aboutView() {
   view.innerHTML = `<div class="container">
     <div class="page-head">
       <span class="eyebrow">Команда «${esc(s.siteName)}»</span>
-      <h1>О проекте</h1>
-      <p>${esc(s.description)}</p>
+      <h1>${esc(s.aboutTitle || "О проекте")}</h1>
+      <p>${esc(s.aboutText || s.description)}</p>
     </div>
 
     <div class="section" style="display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr))">

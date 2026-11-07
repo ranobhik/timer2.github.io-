@@ -42,6 +42,8 @@ export const DEFAULT_SETTINGS = {
   tagline: "аниме онлайн",
   description:
     "Аниме-портал команды «Рабочая партия»: каталог, эпизоды и плееры. Смотрите с любого устройства.",
+  aboutTitle: "О проекте",
+  aboutText: "",
   logo: "",
   accent: "#f43f5e",
   accent2: "#8b5cf6",

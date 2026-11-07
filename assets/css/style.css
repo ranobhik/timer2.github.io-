@@ -123,6 +123,15 @@ p { text-wrap: pretty; }
 }
 .skip-link:focus { transform: none; }
 
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .9em;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface-3) 70%, transparent);
+  overflow-wrap: anywhere;
+}
+
 /* ---------- Утилиты ---------- */
 .container {
   width: 100%;
@@ -541,6 +550,7 @@ main { display: block; min-height: 60vh; padding-bottom: 40px; }
 }
 .hero-title {
   font-size: clamp(30px, 5.6vw, 62px);
+  overflow-wrap: anywhere;
   line-height: 1.02;
   text-wrap: balance;
 }
@@ -871,7 +881,7 @@ main { display: block; min-height: 60vh; padding-bottom: 40px; }
 .stat b { font-family: var(--font-display); font-size: 1.06rem; }
 .stat span { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; }
 
-.prose { color: var(--text-soft); max-width: 78ch; }
+.prose { color: var(--text-soft); max-width: 78ch; overflow-wrap: anywhere; }
 .prose p + p { margin-top: .8em; }
 .prose.is-clamped p:nth-child(n + 4) { display: none; }
 

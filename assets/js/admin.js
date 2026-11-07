@@ -2,7 +2,8 @@
 
 import * as store from "./store.js";
 import * as ui from "./ui.js";
-import { fetchPosterSmart, posterCacheKey, setCachedPoster } from "./shikimori.js";
+import { fetchPosterSmart, posterCacheKey, posterUrlById, setCachedPoster } from "./shikimori.js";
+import * as sources from "./sources.js";
 import {
   $, $$, attr, clone, esc, formatDate, hueFrom, safeUrl, slugify, STATUS_LABELS, uid,
 } from "./utils.js";
@@ -61,6 +62,7 @@ function renderLogin() {
    ====================================================================== */
 const TABS = [
   { key: "content", label: "Контент", icon: "grid" },
+  { key: "import", label: "Импорт", icon: "download" },
   { key: "genres", label: "Жанры", icon: "sparkles" },
   { key: "settings", label: "Настройки сайта", icon: "edit" },
   { key: "publish", label: "Публикация и доступ", icon: "upload" },
@@ -455,6 +457,15 @@ function editorHTML(anime, isNew) {
     </div>
 
     <form id="animeForm" class="stack" style="--gap:20px" novalidate>
+      <div class="panel" style="background:var(--surface-2);padding:14px 16px">
+        <div class="field-row" style="align-items:center;gap:10px;flex-wrap:wrap">
+          <strong style="font-size:.86rem">Быстрый импорт</strong>
+          <input id="quickImport" type="text" placeholder="ID Shikimori, ссылка или название тайтла" style="flex:1 1 220px;min-height:38px;padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface)" />
+          <button class="btn btn-sm" type="button" id="quickImportBtn">${ui.icon("download")} Заполнить всё</button>
+        </div>
+        <p class="hint">Подтянет название, оригинальное название, описание, жанры, рейтинг, возраст, студию, постер и широкий баннер. Плееры и озвучки добавляете сами.</p>
+      </div>
+
       <div class="form-grid">
         ${fieldHTML({ label: "Название *", name: "title", value: anime.title, span: true, placeholder: "Например: Атака титанов" })}
         ${fieldHTML({ label: "Оригинальное название", name: "originalTitle", value: anime.originalTitle, span: true, placeholder: "Shingeki no Kyojin" })}
@@ -482,8 +493,8 @@ function editorHTML(anime, isNew) {
           <label for="f-poster">Постер <small>ссылка, файл или Shikimori</small></label>
           <div class="field-row">
             <input id="f-poster" name="poster" type="text" value="${attr(anime.poster)}" placeholder="https://…/poster.jpg" style="flex:1 1 220px" />
-            <button class="btn btn-soft btn-sm" type="button" id="fetchPoster" title="Найти постер и данные на Shikimori">
-              ${ui.icon("download")} С Shikimori
+            <button class="btn btn-soft btn-sm" type="button" id="fetchPoster" title="Заполнить карточку по Shikimori ID или названию">
+              ${ui.icon("download")} Заполнить с Shikimori
             </button>
             <label class="btn btn-ghost btn-sm" style="margin:0">
               ${ui.icon("upload")} Файл
@@ -493,7 +504,7 @@ function editorHTML(anime, isNew) {
               ${anime.poster ? `<img src="${attr(safeUrl(anime.poster))}" alt="" onerror="this.remove()" />` : ""}
             </span>
           </div>
-          <p class="hint">Укажите Shikimori ID — постер, год, рейтинг и жанры подтянутся автоматически. Загруженные файлы хранятся в localStorage (лимит ~5 МБ).</p>
+          <p class="hint">Укажите Shikimori ID — постер, название, описание, жанры, рейтинг и баннер подтянутся автоматически. Загруженные файлы хранятся в localStorage (лимит ~5 МБ).</p>
         </div>
 
         <div class="field span-2">
@@ -791,18 +802,23 @@ function setField(name, value) {
   if (input) input.value = String(value);
 }
 
-function applyShikimoriFields(data) {
+function applyImportedFields(data) {
+  if (!data) return;
   if (data.shikimoriId) setField("shikimoriId", data.shikimoriId);
   setField("poster", data.poster);
+  setField("banner", data.banner);
+  setField("title", data.title);
   setField("originalTitle", data.originalTitle);
-  const titleInput = $("[name='title']");
-  if (titleInput && !titleInput.value.trim() && data.title) setField("title", data.title);
   setField("year", data.year);
-  setField("rating", data.rating);
+  setField("rating", data.rating ? Number(data.rating).toFixed(1) : "");
+  setField("ageRating", data.ageRating);
+  setField("studio", data.studio);
+  const statusInput = $("[name='status']");
+  if (statusInput && data.status && STATUS_LABELS[data.status]) statusInput.value = data.status;
   const descInput = $("[name='description']");
-  if (descInput && !descInput.value.trim() && data.description) descInput.value = data.description;
+  if (descInput && data.description) descInput.value = data.description;
 
-  (data.genres || []).forEach((genre) => {
+  (data.genres || []).filter(Boolean).forEach((genre) => {
     if (!draftCatalog.genres.includes(genre)) draftCatalog.genres.push(genre);
     const existing = Array.from(document.querySelectorAll("[data-genre-check]"))
       .find((input) => input.value === genre);
@@ -821,9 +837,92 @@ function applyShikimoriFields(data) {
 
   updatePosterPreview(data.poster);
   const statusEl = document.getElementById("editorStatus");
-  if (statusEl) statusEl.textContent = "Данные Shikimori загружены — не забудьте сохранить";
+  if (statusEl) statusEl.textContent = "Данные импортированы — не забудьте сохранить";
   const form = $("#animeForm");
   if (form) captureEditorValues();
+}
+
+function importedEpisodes(data) {
+  const count = Math.min(120, Number(data.episodesCount) || 0);
+  const duration = data.duration ? `${data.duration} мин` : "24 мин";
+  if (Array.isArray(data.episodeList) && data.episodeList.length) {
+    return data.episodeList.map((ep, i) => ({
+      id: uid("ep"),
+      number: Number(ep.number) || i + 1,
+      title: ep.title || "",
+      date: ep.date || "",
+      duration,
+      players: [],
+    }));
+  }
+  if (count > 0) {
+    return Array.from({ length: Math.min(24, count) }, (_, i) => ({
+      id: uid("ep"),
+      number: i + 1,
+      title: "",
+      date: "",
+      duration,
+      players: [],
+    }));
+  }
+  return [];
+}
+
+function createAnimeFromImport(data) {
+  const base = blankAnime();
+  const title = String(data.title || "").trim() || "Без названия";
+  const anime = {
+    ...base,
+    id: uniqueId(title),
+    title,
+    originalTitle: data.originalTitle || "",
+    year: Number(data.year) || new Date().getFullYear(),
+    status: STATUS_LABELS[data.status] ? data.status : "ongoing",
+    genres: (data.genres || []).filter(Boolean),
+    rating: Number(data.rating) || 0,
+    ageRating: data.ageRating || "",
+    description: data.description || "",
+    poster: data.poster || "",
+    banner: data.banner || "",
+    shikimoriId: data.shikimoriId || "",
+    studio: data.studio || "",
+    country: data.country || "Япония",
+    tags: (data.tags || []).filter(Boolean),
+    published: false,
+    featured: false,
+    createdAt: new Date().toISOString(),
+    episodes: importedEpisodes(data),
+  };
+  if (!anime.episodes.length) anime.episodes = base.episodes;
+  anime.genres.forEach((genre) => {
+    if (!draftCatalog.genres.includes(genre)) draftCatalog.genres.push(genre);
+  });
+  draftCatalog.anime.unshift(anime);
+  store.saveDraft(draftCatalog);
+  return anime;
+}
+
+async function importByValue(value, { withEpisodes = false, source } = {}) {
+  const parsed = sources.parseQuery(value);
+  if (!parsed.id && !parsed.text) throw new Error("Пустой запрос");
+  if (parsed.id) {
+    return sources.importCandidate(
+      { source: parsed.source || source || "shikimori", sourceId: parsed.id, title: "" },
+      { kinopoiskToken: draftCatalog.settings.kinopoiskToken || "", withEpisodes },
+    );
+  }
+  try {
+    const full = await sources.findShikimori(parsed.text);
+    if (full) return sources.enrich(full, { withEpisodes });
+  } catch (error) {
+    console.debug("Shikimori search:", error?.message);
+  }
+  const list = await sources.searchAniList(parsed.text, 1);
+  if (!list.length) throw new Error("Ничего не найдено — попробуйте другое название");
+  return sources.importCandidate(list[0], {
+    kinopoiskToken: draftCatalog.settings.kinopoiskToken || "",
+    withEpisodes,
+  });
 }
 
 async function handlePosterFetch(btn) {
@@ -832,13 +931,48 @@ async function handlePosterFetch(btn) {
   btn.textContent = "Ищу…";
   try {
     if (editorModel) captureEditorValues();
-    const data = await fetchPosterSmart(editorModel || {});
-    if (!data || (!data.poster && !data.title)) throw new Error("Ничего не найдено на Shikimori");
-    applyShikimoriFields(data);
-    if (data.fallback) ui.toast("API Shikimori недоступен — постер подставлен по ID", "ok");
-    else ui.toast(data.poster ? "Данные и постер подтянуты" : "Данные найдены, но постера нет", "ok");
+    const model = editorModel || {};
+    const query = model.shikimoriId || model.originalTitle || model.title;
+    let data = null;
+    if (query) {
+      try {
+        data = await importByValue(query);
+      } catch (error) {
+        console.debug("Импорт:", error?.message);
+      }
+    }
+    if (!data) data = await fetchPosterSmart(model);
+    if (!data || (!data.poster && !data.title)) throw new Error("Ничего не найдено");
+    applyImportedFields(data);
+    if (data.fallback) ui.toast("API недоступен — постер подставлен по ID", "info");
+    else ui.toast("Карточка заполнена — проверьте поля и сохраните", "ok");
   } catch (error) {
-    ui.toast(error?.message || "Не удалось получить данные с Shikimori", "err");
+    ui.toast(error?.message || "Не удалось получить данные", "err");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = original;
+  }
+}
+
+async function handleQuickImport(btn) {
+  const input = $("#quickImport");
+  const value = (input?.value || "").trim();
+  if (!value) {
+    ui.toast("Введите ID, ссылку или название", "err");
+    input?.focus();
+    return;
+  }
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = "Ищу…";
+  try {
+    if (editorModel) captureEditorValues();
+    const data = await importByValue(value);
+    applyImportedFields(data);
+    if (input) input.value = "";
+    ui.toast("Карточка заполнена данными", "ok");
+  } catch (error) {
+    ui.toast(error?.message || "Не удалось импортировать", "err");
   } finally {
     btn.disabled = false;
     btn.innerHTML = original;
@@ -850,6 +984,13 @@ function bindEditor(anime, isNew) {
   $("#addEpisode")?.addEventListener("click", addEpisode);
 
   $("#fetchPoster")?.addEventListener("click", (event) => handlePosterFetch(event.currentTarget));
+  $("#quickImportBtn")?.addEventListener("click", (event) => handleQuickImport(event.currentTarget));
+  $("#quickImport")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      $("#quickImportBtn")?.click();
+    }
+  });
   $("#f-poster")?.addEventListener("input", (event) => updatePosterPreview(event.target.value));
 
   // загрузка изображений в data URL
@@ -885,6 +1026,156 @@ function bindEditor(anime, isNew) {
 
   void anime;
   void isNew;
+}
+
+/* ======================================================================
+   Импорт из внешних баз
+   ====================================================================== */
+function importResultsHTML(items) {
+  if (!items.length) {
+    return `<div class="panel"><div class="empty" style="border:0;background:none">Ничего не найдено. Попробуйте другое название или источник.</div></div>`;
+  }
+  const cards = items.map((item) => {
+    const poster = safeUrl(item.poster);
+    const meta = [
+      item.originalTitle,
+      item.year,
+      item.kind,
+      item.score ? `★ ${Number(item.score).toFixed(1)}` : "",
+      item.episodes ? `${item.episodes} эп.` : "",
+    ].filter(Boolean).join(" · ");
+    return `<article class="import-card">
+      <div class="import-poster" style="--h:${hueFrom(item.title || "anime")}">
+        ${poster ? `<img src="${attr(poster)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()" />` : ""}
+      </div>
+      <div class="import-info">
+        <b>${esc(item.title || `ID ${item.sourceId}`)}</b>
+        <small class="muted">${esc(meta || "—")}</small>
+      </div>
+      <button class="btn btn-sm" type="button" data-import-source="${attr(item.source)}"
+        data-import-id="${attr(item.sourceId)}" data-import-title="${attr(item.title || "")}">
+        ${ui.icon("download")} Импортировать
+      </button>
+    </article>`;
+  }).join("");
+
+  return `<div class="panel">
+    <div class="panel-head"><div><h2>Найдено · ${items.length}</h2><p>Выберите тайтл — карточка создастся в черновике и сразу откроется редактор.</p></div></div>
+    <div class="import-list">${cards}</div>
+  </div>`;
+}
+
+function importTab() {
+  const s = draftCatalog.settings;
+  return `<div class="stack" style="--gap:16px">
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Импорт из внешних баз</h2>
+          <p>Введите название, ссылку или ID — данные подтянутся автоматически: название на русском, оригинал, описание, жанры, рейтинг, возраст, студия, постер и широкий баннер.</p>
+        </div>
+      </div>
+      <form id="importForm" class="field-row" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
+        <div class="field" style="flex:1 1 260px;margin:0">
+          <label for="importQuery">Название, ссылка или ID</label>
+          <input id="importQuery" name="query" type="search" placeholder="Атака титанов, 16498 или ссылка на Shikimori" autocomplete="off" />
+        </div>
+        <div class="field" style="flex:0 1 190px;margin:0">
+          <label for="importSource">Источник</label>
+          <select id="importSource" name="source">
+            <option value="shikimori">Shikimori — рус.</option>
+            <option value="anilist">AniList</option>
+            <option value="kinopoisk">Кинопоиск</option>
+          </select>
+        </div>
+        <label class="switch" style="margin-bottom:8px;white-space:nowrap">
+          <input type="checkbox" id="importEpisodes" /><span class="track"></span> Эпизоды
+        </label>
+        <button class="btn" type="submit">${ui.icon("search")} Найти</button>
+      </form>
+      <p class="hint" style="margin-top:10px">
+        Shikimori и AniList работают без ключей. Кинопоиску нужен токен — укажите его в «Настройках сайта»
+        ${s.kinopoiskToken ? "(токен уже сохранён)" : ""}.
+      </p>
+    </div>
+    <div id="importResults"></div>
+  </div>`;
+}
+
+function bindImportTab() {
+  const form = $("#importForm");
+  const results = $("#importResults");
+  if (!form || !results) return;
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const value = String(form.elements.query?.value || "").trim();
+    if (!value) return;
+    const source = form.elements.source?.value || "shikimori";
+    const button = form.querySelector("button[type='submit']");
+    const original = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = "Ищу…";
+    results.innerHTML = `<div class="panel"><p class="muted">Запрашиваю ${esc(sources.SOURCE_LABELS[source] || source)}…</p></div>`;
+
+    try {
+      const parsed = sources.parseQuery(value);
+      const useSource = parsed.source || source;
+      let items = [];
+      if (parsed.id) {
+        items = [{
+          source: useSource,
+          sourceId: parsed.id,
+          title: sources.SOURCE_LABELS[useSource] ? `${sources.SOURCE_LABELS[useSource]} · ID ${parsed.id}` : `ID ${parsed.id}`,
+          originalTitle: "",
+          year: undefined,
+          score: 0,
+          kind: "",
+          poster: useSource === "shikimori" ? posterUrlById(parsed.id) : "",
+          episodes: 0,
+        }];
+      } else if (useSource === "anilist") {
+        items = await sources.searchAniList(parsed.text, 10);
+      } else if (useSource === "kinopoisk") {
+        items = await sources.searchKinopoisk(parsed.text, draftCatalog.settings.kinopoiskToken || "", 10);
+      } else {
+        items = await sources.searchShikimori(parsed.text, 10);
+      }
+      results.innerHTML = importResultsHTML(items);
+    } catch (error) {
+      results.innerHTML = `<div class="panel"><div class="notice">${ui.icon("info")}<div>${esc(error?.message || "Ошибка запроса")}</div></div></div>`;
+      ui.toast(error?.message || "Не удалось выполнить поиск", "err");
+    } finally {
+      button.disabled = false;
+      button.innerHTML = original;
+    }
+  });
+
+  results.addEventListener("click", async (event) => {
+    const btn = event.target.closest("[data-import-id]");
+    if (!btn) return;
+    const original = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = "Импортирую…";
+    try {
+      const candidate = {
+        source: btn.dataset.importSource,
+        sourceId: btn.dataset.importId,
+        title: btn.dataset.importTitle || "",
+      };
+      const data = await sources.importCandidate(candidate, {
+        kinopoiskToken: draftCatalog.settings.kinopoiskToken || "",
+        withEpisodes: Boolean($("#importEpisodes")?.checked),
+      });
+      const created = createAnimeFromImport(data);
+      ui.toast(`«${created.title}» добавлено в черновик`, "ok");
+      goAdmin(`#/admin/edit/${created.id}`);
+    } catch (error) {
+      ui.toast(error?.message || "Не удалось импортировать", "err");
+      btn.disabled = false;
+      btn.innerHTML = original;
+    }
+  });
 }
 
 /* ======================================================================
@@ -989,6 +1280,19 @@ function settingsTab() {
         <div class="field span-2">
           <label for="s-aboutText">Текст страницы «О проекте» <small>пусто — будет краткое описание</small></label>
           <textarea id="s-aboutText" name="aboutText" rows="5">${esc(s.aboutText)}</textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <div><h2>Импорт из внешних баз</h2><p>Shikimori и AniList работают без ключей. Для Кинопоиска нужен бесплатный токен с kinopoisk.dev.</p></div>
+      </div>
+      <div class="form-grid">
+        <div class="field span-2">
+          <label for="s-kinopoisk">Токен Кинопоиска (X-API-KEY)</label>
+          <input id="s-kinopoisk" name="kinopoiskToken" type="text" value="${attr(s.kinopoiskToken || "")}" placeholder="например: 8a1b2c3d-…" autocomplete="off" />
+          <p class="hint">Токен хранится в catalog.json вместе с остальными настройками. Не указывайте его, если импортируете только с Shikimori.</p>
         </div>
       </div>
     </div>
@@ -1127,6 +1431,7 @@ function bindSettingsTab() {
     draftCatalog.settings = {
       ...draftCatalog.settings,
       siteName: get("siteName").trim() || "Аниме-портал",
+      kinopoiskToken: get("kinopoiskToken").trim(),
       tagline: get("tagline").trim(),
       logo: get("logo").trim(),
       footerText: get("footerText").trim(),
@@ -1321,7 +1626,8 @@ export async function renderAdmin(options) {
   }
 
   let body = "";
-  if (tab === "genres") body = genresTab();
+  if (tab === "import") body = importTab();
+  else if (tab === "genres") body = genresTab();
   else if (tab === "settings") body = settingsTab();
   else if (tab === "publish") body = publishTab();
   else body = contentTab();
@@ -1329,7 +1635,8 @@ export async function renderAdmin(options) {
   ctx.mount.innerHTML = shell(tab, body);
   bindShell();
 
-  if (tab === "genres") bindGenresTab();
+  if (tab === "import") bindImportTab();
+  else if (tab === "genres") bindGenresTab();
   else if (tab === "settings") bindSettingsTab();
   else if (tab === "publish") bindPublishTab();
   else bindContentTab();

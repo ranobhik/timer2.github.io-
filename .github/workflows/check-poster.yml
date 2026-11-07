@@ -2,15 +2,13 @@ name: check-poster
 on:
   workflow_dispatch:
 permissions:
-  contents: read
-  issues: write
+  contents: write
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Проверить постеры и CORS
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           {
             for id in 16498 5114 21 1535 40748; do
@@ -24,14 +22,20 @@ jobs:
             curl -s -D - -o /dev/null -L \
               -H "Origin: https://ranobhik.github.io" \
               -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
-              "https://shikimori.one/api/animes/16498" | head -40
+              "https://shikimori.one/api/animes/16498"
             echo
             echo "== image headers =="
             curl -s -D - -o /dev/null -L \
               -H "Origin: https://ranobhik.github.io" \
               -H "Referer: https://ranobhik.github.io/" \
               -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
-              "https://shikimori.one/system/animes/original/16498.jpg" | head -30
+              "https://shikimori.one/system/animes/original/16498.jpg"
           } > /tmp/out.md 2>&1
           cat /tmp/out.md
-          gh issue create --title "poster-check" --body-file /tmp/out.md
+          git config user.name "poster-check"
+          git config user.email "actions@users.noreply.github.com"
+          git checkout -B poster-check
+          cp /tmp/out.md poster-check.md
+          git add poster-check.md
+          git commit -m "poster-check"
+          git push -f origin poster-check

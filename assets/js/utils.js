@@ -157,3 +157,100 @@ export function hashString(str) {
   h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
 }
+
+/* ==========================================================================
+   Поиск без учёта раскладки и транслита
+   "vfcrf dthvbkmjyf" → «маска вермильона», "maska" → «маска», "attack on titan" → английское имя
+   ========================================================================== */
+const LATIN_TO_CYR = {
+  q: "й", w: "ц", e: "у", r: "к", t: "е", y: "н", u: "г", i: "ш", o: "щ", p: "з",
+  "[": "х", "]": "ъ", a: "ф", s: "ы", d: "в", f: "а", g: "п", h: "р", j: "о", k: "л",
+  l: "д", ";": "ж", "'": "э", z: "я", x: "ч", c: "с", v: "м", b: "и", n: "т", m: "ь",
+  ",": "б", ".": "ю", "`": "ё",
+};
+
+const CYR_TO_LATIN = {
+  а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh", з: "z", и: "i",
+  й: "y", к: "k", л: "l", м: "m", н: "n", о: "o", п: "p", р: "r", с: "s", т: "t",
+  у: "u", ф: "f", х: "h", ц: "c", ч: "ch", ш: "sh", щ: "sch", ъ: "", ы: "y", ь: "",
+  э: "e", ю: "yu", я: "ya",
+};
+
+const CYR_LAYOUT = Object.fromEntries(
+  Object.entries(LATIN_TO_CYR).map(([latin, cyr]) => [cyr, latin]),
+);
+
+export function normalizeText(value) {
+  return String(value || "").toLowerCase().replace(/ё/g, "е").replace(/\s+/g, " ").trim();
+}
+
+/** Латиница, набранная на русской раскладке, → кириллица. */
+export function layoutToRu(text) {
+  return String(text || "").toLowerCase().split("").map((char) => {
+    if (LATIN_TO_CYR[char]) return LATIN_TO_CYR[char];
+    return char;
+  }).join("");
+}
+
+/** Кириллица, набранная на русской раскладке, → qwerty-буквы. */
+export function layoutToLat(text) {
+  return String(text || "").toLowerCase().split("").map((char) => {
+    if (CYR_LAYOUT[char]) return CYR_LAYOUT[char];
+    return char;
+  }).join("");
+}
+
+/** Кириллица → латиница (простой транслит), латиница остаётся как есть. */
+export function latinize(text, soft = "") {
+  return String(text || "").toLowerCase().split("").map((char) => {
+    if (char === "ь") return soft;
+    if (CYR_TO_LATIN[char] !== undefined) return CYR_TO_LATIN[char];
+    return /[a-z0-9 ]/.test(char) ? char : " ";
+  }).join("").replace(/\s+/g, " ").trim();
+}
+
+/** Два варианта транслита: мягкий знак опускается или превращается в «y». */
+function latinForms(text) {
+  return [...new Set([latinize(text, ""), latinize(text, "y")])];
+}
+
+/** Все варианты запроса: как есть, в другой раскладке, транслитом. */
+export function searchForms(value) {
+  const raw = normalizeText(value);
+  if (!raw) return [];
+  const forms = new Set([raw]);
+  const hasLatin = /[a-z]/.test(raw);
+  const hasCyr = /[а-я]/.test(raw);
+  if (hasLatin) {
+    const asRu = layoutToRu(raw);
+    if (/[а-я]/.test(asRu)) forms.add(asRu);
+  }
+  if (hasCyr) forms.add(layoutToLat(raw));
+  latinForms(raw).forEach((form) => forms.add(form));
+  return [...forms].map((form) => form.trim()).filter(Boolean);
+}
+
+/** Проверяет, подходит ли запись под запрос (с учётом раскладки, транслита и регистра). */
+export function matchesSearch(fields, query) {
+  const forms = searchForms(query);
+  if (!forms.length) return true;
+
+  const values = (Array.isArray(fields) ? fields : [fields])
+    .filter(Boolean)
+    .map((value) => normalizeText(value));
+  if (!values.length) return false;
+
+  const targets = new Set();
+  values.forEach((value) => {
+    targets.add(value);
+    latinForms(value).forEach((form) => targets.add(form));
+  });
+
+  const needles = new Set();
+  forms.forEach((form) => {
+    needles.add(form);
+    latinForms(form).forEach((variant) => needles.add(variant));
+  });
+
+  return [...needles].some((needle) => [...targets].some((target) => target.includes(needle)));
+}

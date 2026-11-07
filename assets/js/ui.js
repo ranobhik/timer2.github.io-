@@ -15,7 +15,7 @@ export function posterInner(anime, label = "Рабочая партия") {
     </div>`;
   if (!src) return fallback;
   const onerror = "if(!this.dataset.png){this.dataset.png='1';this.src=this.src.replace(/\\.jpg(\\?|$)/,'.png');}else{this.remove();}";
-  return `${fallback}<img src="${attr(src)}" alt="Постер «${attr(anime.title)}»" loading="lazy" decoding="async" referrerpolicy="no-referrer" style="position:absolute;inset:0;z-index:1" onerror="${onerror}" />`;
+  return `${fallback}<img src="${attr(src)}" alt="Постер «${attr(anime.title)}»" loading="lazy" decoding="async" referrerpolicy="no-referrer" draggable="false" style="position:absolute;inset:0;z-index:1" onerror="${onerror}" />`;
 }
 
 /* ---------- Карточка аниме ---------- */
@@ -28,7 +28,7 @@ export function cardHTML(anime, opts = {}) {
   return `<article class="card" data-anime-card="${attr(anime.id)}">
     <div class="card-poster" style="--h:${hueFrom(anime.title)}">
       ${posterInner(anime)}
-      <a class="card-link" href="${attr(href)}" aria-label="${attr(opts.continue ? `Продолжить просмотр: ${anime.title}` : `${anime.title} — открыть страницу`)}"></a>
+      <a class="card-link" draggable="false" href="${attr(href)}" aria-label="${attr(opts.continue ? `Продолжить просмотр: ${anime.title}` : `${anime.title} — открыть страницу`)}"></a>
       ${total ? `<span class="card-badge">${icon("tv")} ${total}</span>` : ""}
       ${anime.rating ? `<span class="card-badge rating">${icon("star")} ${anime.rating.toFixed(1)}</span>` : ""}
       <button class="card-fav${fav ? " is-on" : ""}" type="button" data-fav="${attr(anime.id)}"
@@ -36,7 +36,7 @@ export function cardHTML(anime, opts = {}) {
       ${progress > 0 ? `<div class="card-progress"><i style="width:${Math.round(progress * 100)}%"></i></div>` : ""}
     </div>
     <div class="card-body">
-      <a class="card-link" href="${attr(href)}">
+      <a class="card-link" draggable="false" href="${attr(href)}">
         <h3 class="card-title">${esc(anime.title)}</h3>
         <p class="card-sub">
           <span>${esc(anime.year)}</span>

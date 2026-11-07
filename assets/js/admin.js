@@ -5,7 +5,8 @@ import * as ui from "./ui.js";
 import { fetchPosterSmart, posterCacheKey, posterUrlById, setCachedPoster } from "./shikimori.js";
 import * as sources from "./sources.js";
 import {
-  $, $$, attr, clone, esc, formatDate, hueFrom, safeUrl, slugify, STATUS_LABELS, uid,
+  $, $$, attr, clone, esc, formatDate, hueFrom, matchesSearch, safeUrl, searchForms, slugify,
+  STATUS_LABELS, uid,
 } from "./utils.js";
 
 const PLAYER_TYPES = {
@@ -188,11 +189,14 @@ function contentTab() {
 
 function bindContentTab() {
   $("#adminSearch")?.addEventListener("input", (event) => {
-    const q = event.target.value.trim().toLowerCase();
+    const query = event.target.value.trim();
     $$("#adminRows tr[data-row]").forEach((row) => {
       const anime = draftCatalog.anime.find((a) => a.id === row.dataset.row);
-      const hay = `${anime?.title || ""} ${anime?.id || ""} ${(anime?.genres || []).join(" ")}`.toLowerCase();
-      row.classList.toggle("hide", Boolean(q) && !hay.includes(q));
+      const hit = !query || matchesSearch(
+        [anime?.title, anime?.id, anime?.originalTitle, ...(anime?.aliases || []), ...(anime?.genres || [])],
+        query,
+      );
+      row.classList.toggle("hide", !hit);
     });
   });
 
@@ -331,6 +335,7 @@ function blankAnime() {
     director: "",
     country: "Япония",
     tags: [],
+    aliases: [],
     published: true,
     featured: false,
     createdAt: new Date().toISOString(),
@@ -460,7 +465,10 @@ function editorHTML(anime, isNew) {
       <div class="panel" style="background:var(--surface-2);padding:14px 16px">
         <div class="field-row" style="align-items:center;gap:10px;flex-wrap:wrap">
           <strong style="font-size:.86rem">Быстрый импорт</strong>
-          <input id="quickImport" type="text" placeholder="ID Shikimori, ссылка или название тайтла" style="flex:1 1 220px;min-height:38px;padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface)" />
+          <div class="suggest-wrap" style="flex:1 1 220px">
+            <input id="quickImport" type="text" autocomplete="off" placeholder="ID Shikimori, ссылка или название тайтла" style="width:100%;min-height:38px;padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:var(--surface)" />
+            <div class="suggest" id="quickSuggest" hidden></div>
+          </div>
           <button class="btn btn-sm" type="button" id="quickImportBtn">${ui.icon("download")} Заполнить всё</button>
         </div>
         <p class="hint">Подтянет название, оригинальное название, описание, жанры, рейтинг, возраст, студию, постер и широкий баннер. Плееры и озвучки добавляете сами.</p>
@@ -888,6 +896,7 @@ function createAnimeFromImport(data) {
     studio: data.studio || "",
     country: data.country || "Япония",
     tags: (data.tags || []).filter(Boolean),
+    aliases: (data.aliases || []).filter(Boolean),
     published: false,
     featured: false,
     createdAt: new Date().toISOString(),
@@ -911,11 +920,13 @@ async function importByValue(value, { withEpisodes = false, source } = {}) {
       { kinopoiskToken: draftCatalog.settings.kinopoiskToken || "", withEpisodes },
     );
   }
-  try {
-    const full = await sources.findShikimori(parsed.text);
-    if (full) return sources.enrich(full, { withEpisodes });
-  } catch (error) {
-    console.debug("Shikimori search:", error?.message);
+  for (const query of queryVariants(parsed.text)) {
+    try {
+      const full = await sources.findShikimori(query);
+      if (full) return sources.enrich(full, { withEpisodes });
+    } catch (error) {
+      console.debug("Shikimori search:", error?.message);
+    }
   }
   const list = await sources.searchAniList(parsed.text, 1);
   if (!list.length) throw new Error("Ничего не найдено — попробуйте другое название");
@@ -954,29 +965,186 @@ async function handlePosterFetch(btn) {
   }
 }
 
-async function handleQuickImport(btn) {
+async function handleQuickImport(btn, candidate = null) {
   const input = $("#quickImport");
   const value = (input?.value || "").trim();
-  if (!value) {
+  if (!value && !candidate) {
     ui.toast("Введите ID, ссылку или название", "err");
     input?.focus();
     return;
   }
-  const original = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = "Ищу…";
+  const original = btn ? btn.innerHTML : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = "Ищу…";
+  }
   try {
     if (editorModel) captureEditorValues();
-    const data = await importByValue(value);
+    const data = candidate
+      ? await sources.importCandidate(candidate, {
+        kinopoiskToken: draftCatalog.settings.kinopoiskToken || "",
+        withEpisodes: false,
+      })
+      : await importByValue(value);
     applyImportedFields(data);
     if (input) input.value = "";
     ui.toast("Карточка заполнена данными", "ok");
   } catch (error) {
     ui.toast(error?.message || "Не удалось импортировать", "err");
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = original;
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = original;
+    }
   }
+}
+
+/* Варианты запроса с учётом раскладки и транслита: «vfcrf dthvbkmjyf» → «маска вермильона» */
+function queryVariants(value) {
+  const text = String(value || "").trim();
+  if (!text) return [];
+  const forms = searchForms(text);
+  const cyrillic = /[а-яё]/i.test(text) ? text : forms.find((form) => /[а-яё]/.test(form));
+  return [...new Set([cyrillic, text].filter(Boolean))];
+}
+
+/* Поиск кандидатов для подсказок */
+async function searchCandidates(value, source = "shikimori", limit = 6) {
+  const parsed = sources.parseQuery(value);
+  if (parsed.id) {
+    const src = parsed.source || source;
+    return [{
+      source: src,
+      sourceId: parsed.id,
+      title: `${sources.SOURCE_LABELS[src] || src} · ID ${parsed.id}`,
+      originalTitle: "",
+      year: undefined,
+      score: 0,
+      kind: "",
+      poster: src === "shikimori" ? posterUrlById(parsed.id) : "",
+    }];
+  }
+  const text = parsed.text || value;
+  if (source === "anilist") return sources.searchAniList(text, limit);
+  if (source === "kinopoisk") return sources.searchKinopoisk(text, draftCatalog.settings.kinopoiskToken || "", limit);
+
+  for (const query of queryVariants(text)) {
+    try {
+      const list = await sources.searchShikimori(query, limit);
+      if (list.length) return list;
+    } catch (error) {
+      console.debug("Shikimori search:", error?.message);
+    }
+  }
+  try {
+    return await sources.searchAniList(text, limit);
+  } catch (error) {
+    console.debug("AniList search:", error?.message);
+    return [];
+  }
+}
+
+/* Подсказки под полем ввода */
+function suggestItemHTML(item, index, active) {
+  const poster = safeUrl(item.poster);
+  const meta = [
+    item.originalTitle,
+    item.year,
+    item.kind,
+    item.score ? `★ ${Number(item.score).toFixed(1)}` : "",
+    item.episodes ? `${item.episodes} эп.` : "",
+  ].filter(Boolean).join(" · ");
+  return `<button type="button" role="option" class="suggest-item${index === active ? " is-active" : ""}" data-suggest-index="${index}">
+    <span class="suggest-poster" style="--h:${hueFrom(item.title || "anime")}">${poster ? `<img src="${attr(poster)}" alt="" referrerpolicy="no-referrer" loading="lazy" onerror="this.remove()" />` : ""}</span>
+    <span class="suggest-text"><b>${esc(item.title || `ID ${item.sourceId}`)}</b><small>${esc(meta || "—")}</small></span>
+  </button>`;
+}
+
+function attachSuggest({ input, box, search, onPick, delay = 320 }) {
+  if (!input || !box) return;
+  let items = [];
+  let active = -1;
+  let timer = null;
+  let seq = 0;
+
+  const close = () => {
+    box.hidden = true;
+    box.innerHTML = "";
+    items = [];
+    active = -1;
+  };
+
+  const show = (list) => {
+    items = list;
+    active = list.length ? 0 : -1;
+    box.innerHTML = list.length
+      ? list.map((item, index) => suggestItemHTML(item, index, active)).join("")
+      : `<div class="suggest-empty">Ничего не найдено</div>`;
+    box.hidden = false;
+  };
+
+  const highlight = () => {
+    box.querySelectorAll(".suggest-item").forEach((el, index) => {
+      el.classList.toggle("is-active", index === active);
+    });
+  };
+
+  const run = async (value) => {
+    const mySeq = ++seq;
+    box.hidden = false;
+    box.innerHTML = `<div class="suggest-empty">Ищу варианты…</div>`;
+    try {
+      const list = await search(value);
+      if (mySeq !== seq) return;
+      show(list.slice(0, 6));
+    } catch (error) {
+      if (mySeq !== seq) return;
+      items = [];
+      box.innerHTML = `<div class="suggest-empty">${esc(error?.message || "Ошибка поиска")}</div>`;
+    }
+  };
+
+  input.addEventListener("input", () => {
+    const value = input.value.trim();
+    clearTimeout(timer);
+    seq += 1;
+    if (value.length < 2) { close(); return; }
+    timer = setTimeout(() => run(value), delay);
+  });
+
+  input.addEventListener("keydown", (event) => {
+    if (box.hidden) return;
+    if (event.key === "ArrowDown") {
+      if (!items.length) return;
+      event.preventDefault();
+      active = Math.min(items.length - 1, active + 1);
+      highlight();
+    } else if (event.key === "ArrowUp") {
+      if (!items.length) return;
+      event.preventDefault();
+      active = Math.max(0, active - 1);
+      highlight();
+    } else if (event.key === "Enter") {
+      if (!items[active]) return;
+      event.preventDefault();
+      const picked = items[active];
+      close();
+      onPick(picked);
+    } else if (event.key === "Escape") {
+      close();
+    }
+  });
+
+  box.addEventListener("mousedown", (event) => {
+    const btn = event.target.closest("[data-suggest-index]");
+    if (!btn) return;
+    event.preventDefault();
+    const picked = items[Number(btn.dataset.suggestIndex)];
+    close();
+    if (picked) onPick(picked);
+  });
+
+  input.addEventListener("blur", () => setTimeout(close, 180));
 }
 
 function bindEditor(anime, isNew) {
@@ -985,11 +1153,11 @@ function bindEditor(anime, isNew) {
 
   $("#fetchPoster")?.addEventListener("click", (event) => handlePosterFetch(event.currentTarget));
   $("#quickImportBtn")?.addEventListener("click", (event) => handleQuickImport(event.currentTarget));
-  $("#quickImport")?.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      $("#quickImportBtn")?.click();
-    }
+  attachSuggest({
+    input: $("#quickImport"),
+    box: $("#quickSuggest"),
+    search: (value) => searchCandidates(value, "shikimori"),
+    onPick: (item) => handleQuickImport($("#quickImportBtn"), item),
   });
   $("#f-poster")?.addEventListener("input", (event) => updatePosterPreview(event.target.value));
 
@@ -1078,7 +1246,10 @@ function importTab() {
       <form id="importForm" class="field-row" style="align-items:flex-end;gap:10px;flex-wrap:wrap">
         <div class="field" style="flex:1 1 260px;margin:0">
           <label for="importQuery">Название, ссылка или ID</label>
-          <input id="importQuery" name="query" type="search" placeholder="Атака титанов, 16498 или ссылка на Shikimori" autocomplete="off" />
+          <div class="suggest-wrap">
+            <input id="importQuery" name="query" type="search" placeholder="Атака титанов, 16498 или ссылка на Shikimori" autocomplete="off" />
+            <div class="suggest" id="importSuggest" hidden></div>
+          </div>
         </div>
         <div class="field" style="flex:0 1 190px;margin:0">
           <label for="importSource">Источник</label>
@@ -1119,28 +1290,7 @@ function bindImportTab() {
     results.innerHTML = `<div class="panel"><p class="muted">Запрашиваю ${esc(sources.SOURCE_LABELS[source] || source)}…</p></div>`;
 
     try {
-      const parsed = sources.parseQuery(value);
-      const useSource = parsed.source || source;
-      let items = [];
-      if (parsed.id) {
-        items = [{
-          source: useSource,
-          sourceId: parsed.id,
-          title: sources.SOURCE_LABELS[useSource] ? `${sources.SOURCE_LABELS[useSource]} · ID ${parsed.id}` : `ID ${parsed.id}`,
-          originalTitle: "",
-          year: undefined,
-          score: 0,
-          kind: "",
-          poster: useSource === "shikimori" ? posterUrlById(parsed.id) : "",
-          episodes: 0,
-        }];
-      } else if (useSource === "anilist") {
-        items = await sources.searchAniList(parsed.text, 10);
-      } else if (useSource === "kinopoisk") {
-        items = await sources.searchKinopoisk(parsed.text, draftCatalog.settings.kinopoiskToken || "", 10);
-      } else {
-        items = await sources.searchShikimori(parsed.text, 10);
-      }
+      const items = await searchCandidates(value, source, 10);
       results.innerHTML = importResultsHTML(items);
     } catch (error) {
       results.innerHTML = `<div class="panel"><div class="notice">${ui.icon("info")}<div>${esc(error?.message || "Ошибка запроса")}</div></div></div>`;
@@ -1151,18 +1301,8 @@ function bindImportTab() {
     }
   });
 
-  results.addEventListener("click", async (event) => {
-    const btn = event.target.closest("[data-import-id]");
-    if (!btn) return;
-    const original = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = "Импортирую…";
+  const importPicked = async (candidate) => {
     try {
-      const candidate = {
-        source: btn.dataset.importSource,
-        sourceId: btn.dataset.importId,
-        title: btn.dataset.importTitle || "",
-      };
       const data = await sources.importCandidate(candidate, {
         kinopoiskToken: draftCatalog.settings.kinopoiskToken || "",
         withEpisodes: Boolean($("#importEpisodes")?.checked),
@@ -1172,9 +1312,29 @@ function bindImportTab() {
       goAdmin(`#/admin/edit/${created.id}`);
     } catch (error) {
       ui.toast(error?.message || "Не удалось импортировать", "err");
-      btn.disabled = false;
-      btn.innerHTML = original;
     }
+  };
+
+  results.addEventListener("click", async (event) => {
+    const btn = event.target.closest("[data-import-id]");
+    if (!btn) return;
+    const original = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = "Импортирую…";
+    await importPicked({
+      source: btn.dataset.importSource,
+      sourceId: btn.dataset.importId,
+      title: btn.dataset.importTitle || "",
+    });
+    btn.disabled = false;
+    btn.innerHTML = original;
+  });
+
+  attachSuggest({
+    input: $("#importQuery"),
+    box: $("#importSuggest"),
+    search: (value) => searchCandidates(value, $("#importSource")?.value || "shikimori"),
+    onPick: importPicked,
   });
 }
 

@@ -342,6 +342,7 @@ html[data-theme="light"] .icon-moon { display: block; }
   display: flex;
   align-items: center;
   gap: 12px;
+  padding-left: var(--gutter);
   overflow: hidden;
   border-top: 1px solid var(--line);
   background: color-mix(in srgb, var(--accent) 12%, var(--bg-soft));

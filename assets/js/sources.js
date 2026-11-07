@@ -78,6 +78,13 @@ function absolute(url) {
   return raw;
 }
 
+/** Shikimori отдаёт заглушку missing_original.jpg, если постера нет — считаем, что его нет. */
+function pickShikiImage(image) {
+  const original = image?.original || image?.preview || "";
+  if (!original || /missing_(original|preview)/i.test(original)) return "";
+  return absolute(original);
+}
+
 function stripHtml(value) {
   if (!value) return "";
   const holder = document.createElement("div");
@@ -124,7 +131,7 @@ function shikimoriCandidate(item) {
     year: yearOf(item.aired_on),
     score: Number(item.score) || 0,
     kind: KIND_LABELS[item.kind] || item.kind || "",
-    poster: absolute(item.image?.original || item.image?.preview || "") || posterUrlById(item.id),
+    poster: pickShikiImage(item.image),
     episodes: Number(item.episodes) || Number(item.episodes_aired) || 0,
     status: SHIKI_STATUS[item.status] || "ongoing",
   };
@@ -149,9 +156,9 @@ export function mapShikimoriFull(data) {
     rating: Math.min(10, Math.max(0, Number(data.score) || 0)),
     ageRating: ageFromShikimori(data.rating),
     description: stripHtml(data.description_html) || String(data.description || "").trim(),
-    poster: absolute(data.image?.original || data.image?.preview || "") || posterUrlById(data.id),
-    banner: screenshots.length ? absolute(screenshots[0].original || screenshots[0].preview) : "",
-    screenshots: screenshots.map((shot) => absolute(shot.original || shot.preview)).filter(Boolean),
+    poster: pickShikiImage(data.image),
+    banner: screenshots.length ? pickShikiImage(screenshots[0]) : "",
+    screenshots: screenshots.map(pickShikiImage).filter(Boolean),
     studio: studios[0] || "",
     director: "",
     country: "Япония",

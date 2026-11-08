@@ -271,6 +271,12 @@ if (heroSlides.length > 1) {
   check("Карусель: выбранный слайд не сбрасывается", Boolean(picked) && picked === after, `${picked} → ${after}`);
 }
 check(
+  "Завершённый тайтл из Kodik без даты и с большим разрывом скрыт",
+  storeMod.isAbandoned(
+    { source: "kodik", status: "released", kind: "ТВ-сериал", episodes: new Array(5).fill({}), totalEpisodes: 12, sourceUpdatedAt: "" },
+  ) === true,
+);
+check(
   "Завершённый тайтл с одной серией скрыт даже при свежих датах",
   storeMod.isAbandoned(
     { status: "released", kind: "ТВ-сериал", episodes: [{}], episodesAired: 12, sourceUpdatedAt: new Date().toISOString() },

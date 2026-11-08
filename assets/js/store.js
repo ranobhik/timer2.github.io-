@@ -492,6 +492,8 @@ export function getAnime(id) {
 
 /* Сколько дней без новых серий считаем «заброшено» */
 export const ABANDON_DAYS = 90;
+/* Для завершённых тайтлов окно короче: живая озвучка обновляется раз в неделю-две */
+export const ABANDON_DAYS_FINISHED = 45;
 
 /**
  * Заброшенная озвучка: вышли не все серии, и давно ничего не заливали.
@@ -506,7 +508,7 @@ export function isAbandoned(anime, now = Date.now(), days = ABANDON_DAYS) {
   const expected = aired || total;
   const raw = anime?.sourceUpdatedAt || anime?.uploadedAt || "";
   const stamp = Date.parse(String(raw).trim().replace(" ", "T"));
-  const stale = Number.isFinite(stamp) ? now - stamp > days * 86400000 : false;
+  const hasStamp = Number.isFinite(stamp);
 
   if (expected && have >= expected) return false;
 
@@ -514,9 +516,14 @@ export function isAbandoned(anime, now = Date.now(), days = ABANDON_DAYS) {
   const film = /фильм|movie|спешл|special|ona|ova/i.test(String(anime?.kind || ""));
   /* завершённый сериал, где у нас всего одна серия, — заброшен без оглядки на даты */
   if (finished && !film && have <= 1) return true;
-
   if (!expected) return false;
-  return stale;
+
+  const limit = finished ? ABANDON_DAYS_FINISHED : days;
+  if (!hasStamp) {
+    /* у материалов Kodik дата есть всегда: пустая дата + большой разрыв = заброшено */
+    return anime?.source === "kodik" && finished && expected - have >= 3;
+  }
+  return now - stamp > limit * 86400000;
 }
 
 export function publicAnime() {

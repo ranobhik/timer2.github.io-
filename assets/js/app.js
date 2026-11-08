@@ -303,6 +303,21 @@ async function fillDetailsAndCvh(entries) {
         }
         await new Promise((resolve) => setTimeout(resolve, 350));
       }
+      /* Shikimori часто отдаёт 0 серий — берём число из MyAnimeList/Kitsu */
+      if (!entry.totalEpisodes) {
+        try {
+          const total = await sources.resolveEpisodeTotal({
+            malId: entry.malId,
+            title: entry.originalTitle || entry.title,
+            year: entry.year,
+          });
+          if (total.total) { entry.totalEpisodes = total.total; touched = true; }
+          if (!entry.malId && total.malId) { entry.malId = total.malId; touched = true; }
+        } catch (error) {
+          console.debug("Число серий:", entry.title, error?.message);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 600));
+      }
       if (attachCvh(entry)) {
         cvhTried += 1;
         try {
@@ -1413,8 +1428,20 @@ function ensureDetailsForAnime(anime) {
     anime.rating = Number(anime.rating) || Number(info.rating) || 0;
     anime.malId = Number(anime.malId) || Number(info.malId) || 0;
     anime.status = STATUS_MAP[info.status] || anime.status;
+    anime.episodesAired = Number(info.episodesAired) || anime.episodesAired || 0;
+    anime.totalEpisodes = Number(info.episodes) || anime.totalEpisodes || 0;
     if (!anime.poster && info.poster) anime.poster = info.poster;
     render();
+    if (!anime.totalEpisodes) {
+      sources.resolveEpisodeTotal({ malId: anime.malId, title: anime.originalTitle || anime.title, year: anime.year })
+        .then((total) => {
+          if (!total.total) return;
+          anime.totalEpisodes = total.total;
+          if (!anime.malId && total.malId) anime.malId = total.malId;
+          render();
+        })
+        .catch((error) => console.debug("Число серий:", error?.message));
+    }
   }).catch((error) => {
     detailsDone.delete(anime.id);
     console.debug("Описание Shikimori:", error?.message);

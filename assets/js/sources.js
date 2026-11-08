@@ -641,6 +641,60 @@ export async function getJikanAnime(malId) {
    Эпизоды (Jikan / MyAnimeList, по MAL ID)
    ====================================================================== */
 /** Ищет MAL ID по названию — нужен, когда Shikimori/AniList ещё не связали тайтл с MAL. */
+/* ---------- Сколько всего серий: запасные источники ---------- */
+const TOTALS_KEY = "rp.totals.v1";
+
+function totalsCache() {
+  try {
+    const raw = window.localStorage.getItem(TOTALS_KEY);
+    const data = raw ? JSON.parse(raw) : {};
+    return data && typeof data === "object" ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveTotalsCache(map) {
+  try { window.localStorage.setItem(TOTALS_KEY, JSON.stringify(map)); } catch { /* переполнение — не страшно */ }
+}
+
+/* Kitsu умеет отдавать число серий по MAL ID на случай, если Jikan молчит */
+async function kitsuEpisodeTotal(malId) {
+  const data = await request(
+    `https://kitsu.io/api/edge/mappings?filter[externalSite]=myanimelist%2Fanime&filter[externalId]=${Number(malId)}&include=item`,
+    { timeout: 8000 },
+  );
+  const item = (data?.included || []).find((entry) => entry?.type === "anime");
+  return Number(item?.attributes?.episodeCount) || 0;
+}
+
+/**
+ * Общее число серий из MyAnimeList (через Jikan) и Kitsu.
+ * Shikimori часто отдаёт 0 — тогда без этого не понять, заброшена озвучка или нет.
+ */
+export async function resolveEpisodeTotal({ malId = 0, title = "", year = 0 } = {}) {
+  const cache = totalsCache();
+  const key = Number(malId) ? `m${Number(malId)}` : `t${translitSlug(String(title || ""))}`;
+  const hit = cache[key];
+  if (hit && Date.now() - Number(hit.at || 0) < 7 * 86400000 && Number(hit.total)) {
+    return { malId: Number(hit.malId) || Number(malId) || 0, total: Number(hit.total) || 0, aired: 0 };
+  }
+
+  let id = Number(malId) || 0;
+  if (!id && title) id = await resolveMalId(title, year).catch(() => 0);
+
+  let total = 0;
+  if (id) {
+    const jikan = await getJikanAnime(id).catch(() => null);
+    total = Number(jikan?.episodesCount) || 0;
+    if (!total) total = await kitsuEpisodeTotal(id).catch(() => 0);
+  }
+
+  cache[key] = { malId: id, total, at: Date.now() };
+  saveTotalsCache(cache);
+  return { malId: id, total, aired: 0 };
+}
+
 export async function resolveMalId(title, year = 0) {
   const query = String(title || "").trim();
   if (!query) return 0;

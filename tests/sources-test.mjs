@@ -216,6 +216,11 @@ check("Kodik→карточка: серии с плеерами", catalogEntries
 check("Kodik→карточка: плеер это ссылка Kodik", /kodikplayer\.com/.test(catalogEntries[0].episodes[0].players[0].url), catalogEntries[0]?.episodes?.[0]?.players?.[0]?.url);
 check("Kodik→карточка: постер не выдумываем", catalogEntries[0].poster === "", catalogEntries[0].poster);
 check("Kodik→карточка: кадр как запасная обложка", Boolean(catalogEntries[0].banner), catalogEntries[0].banner);
+const malTotal = await sources.resolveEpisodeTotal({ malId: 61999 });
+check("Число серий из MyAnimeList", malTotal.total === 12, JSON.stringify(malTotal));
+const malTotalByTitle = await sources.resolveEpisodeTotal({ title: "Маска вермильона", year: 2026 });
+check("Число серий по названию (поиск MAL)", malTotalByTitle.total === 12, JSON.stringify(malTotalByTitle));
+
 check(
   "Kodik→карточка: даты загрузки и обновления сохранены",
   catalogEntries[0]?.sourceUpdatedAt === "2026-03-01T12:00:00.000Z" && catalogEntries[0]?.uploadedAt === "2026-02-10T12:00:00.000Z",
